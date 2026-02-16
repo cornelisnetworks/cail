@@ -302,9 +302,20 @@ static int custom_allreduce(const void *sendbuf, void *recvbuf, int count,
     MPI_Type_size(datatype, &type_size);
     size_t bufsize = (size_t)count * type_size;
     
-    /* Determine which algorithm to use */
+    /* 
+     * Determine if we should use custom GPU allreduce or fallback to MPI
+     * usage depends on if the buffer is on GPU
+     */
     int use_gpu = is_device_pointer(recvbuf);
     
+    /* If not using GPU memory, usage standard MPI_Allreduce */
+    if (!use_gpu && sendbuf != MPI_IN_PLACE && !is_device_pointer(sendbuf)) {
+         if (debug) {
+             fprintf(stderr, "[Rank %d] Host buffer detected, using standard MPI_Allreduce\n", rank);
+         }
+         return real_MPI_Allreduce(sendbuf, recvbuf, count, datatype, op, comm);
+    }
+
     if (debug) {
         /* Get device IDs for buffers */
         int sendbuf_dev = get_device_id(sendbuf);

@@ -60,14 +60,9 @@ int recursive_doubling_allreduce(const void *sendbuf, void *recvbuf,
     size_t bufsize = (size_t)count * type_size;
     
     /*
-     * Detect if we're working with GPU memory.
-     * If either sendbuf or recvbuf is on GPU, we'll use GPU-aware operations.
-     * This avoids unnecessary staging through host memory.
+     * We assume this function is called only for GPU buffers.
      */
-    int use_gpu = is_device_pointer(recvbuf);
-    if (sendbuf != MPI_IN_PLACE && is_device_pointer(sendbuf)) {
-        use_gpu = 1;
-    }
+    int use_gpu = 1;
     
     /*
      * Handle MPI_IN_PLACE: when sendbuf is MPI_IN_PLACE, the input data
@@ -81,15 +76,11 @@ int recursive_doubling_allreduce(const void *sendbuf, void *recvbuf,
     
     /* Initialize recvbuf with input data (copy sendbuf -> recvbuf if needed) */
     if (src != recvbuf) {
-        if (use_gpu) {
-            cudaError_t err = cudaMemcpy(recvbuf, src, bufsize, cudaMemcpyDefault);
-            if (err != cudaSuccess) {
-                fprintf(stderr, "Error: cudaMemcpy failed in recursive_doubling_allreduce: %s\n",
-                        cudaGetErrorString(err));
-                return MPI_ERR_OTHER;
-            }
-        } else {
-            memcpy(recvbuf, src, bufsize);
+        cudaError_t err = cudaMemcpy(recvbuf, src, bufsize, cudaMemcpyDefault);
+        if (err != cudaSuccess) {
+            fprintf(stderr, "Error: cudaMemcpy failed in recursive_doubling_allreduce: %s\n",
+                    cudaGetErrorString(err));
+            return MPI_ERR_OTHER;
         }
     }
     
@@ -108,27 +99,21 @@ int recursive_doubling_allreduce(const void *sendbuf, void *recvbuf,
     static size_t cached_bufsize = 0;
     
     void *tmpbuf = NULL;
-    if (use_gpu) {
-        /* Simple caching strategy: keep one buffer large enough for current request */
-        if (cached_tmpbuf == NULL || bufsize > cached_bufsize) {
-            if (cached_tmpbuf) {
-                cudaFree(cached_tmpbuf);
-            }
-            cudaError_t err = cudaMalloc(&cached_tmpbuf, bufsize);
-            if (err != cudaSuccess) {
-                fprintf(stderr, "Error: cudaMalloc failed: %s\n", cudaGetErrorString(err));
-                return MPI_ERR_NO_MEM;
-            }
-            cached_bufsize = bufsize;
+
+    /* Simple caching strategy: keep one buffer large enough for current request */
+    if (cached_tmpbuf == NULL || bufsize > cached_bufsize) {
+        if (cached_tmpbuf) {
+            cudaFree(cached_tmpbuf);
         }
-        tmpbuf = cached_tmpbuf;
-    } else {
-        tmpbuf = malloc(bufsize);
-        if (tmpbuf == NULL) {
-            fprintf(stderr, "Error: malloc failed in recursive_doubling_allreduce\n");
+        cudaError_t err = cudaMalloc(&cached_tmpbuf, bufsize);
+        if (err != cudaSuccess) {
+            fprintf(stderr, "Error: cudaMalloc failed: %s\n", cudaGetErrorString(err));
             return MPI_ERR_NO_MEM;
         }
+        cached_bufsize = bufsize;
     }
+    tmpbuf = cached_tmpbuf;
+
     
     /*
      * Find the largest power of 2 that is <= nprocs.
@@ -256,9 +241,10 @@ int recursive_doubling_allreduce(const void *sendbuf, void *recvbuf,
     }
     
     /* Clean up: free temporary buffer only if host memory */
-    if (!use_gpu) {
-        free(tmpbuf);
-    }
+    /* Since we only assume GPU now, we don't free tmpbuf here */
+    // if (!use_gpu) {
+    //     free(tmpbuf);
+    // }
     
     return MPI_SUCCESS;
 }

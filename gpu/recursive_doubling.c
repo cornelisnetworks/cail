@@ -101,16 +101,27 @@ int recursive_doubling_allreduce(const void *sendbuf, void *recvbuf,
     /*
      * Allocate temporary buffer for receiving data from partner ranks.
      * This buffer is reused across all communication steps.
-     * For GPU operations, we allocate on the GPU to avoid host staging.
+     * To improve performance, we use a simple static buffer for small messages
+     * to avoid expensive cudaMalloc/cudaFree calls on the critical path.
      */
+    static void *cached_tmpbuf = NULL;
+    static size_t cached_bufsize = 0;
+    
     void *tmpbuf = NULL;
     if (use_gpu) {
-        cudaError_t err = cudaMalloc(&tmpbuf, bufsize);
-        if (err != cudaSuccess) {
-            fprintf(stderr, "Error: cudaMalloc failed in recursive_doubling_allreduce: %s\n",
-                    cudaGetErrorString(err));
-            return MPI_ERR_NO_MEM;
+        /* Simple caching strategy: keep one buffer large enough for current request */
+        if (cached_tmpbuf == NULL || bufsize > cached_bufsize) {
+            if (cached_tmpbuf) {
+                cudaFree(cached_tmpbuf);
+            }
+            cudaError_t err = cudaMalloc(&cached_tmpbuf, bufsize);
+            if (err != cudaSuccess) {
+                fprintf(stderr, "Error: cudaMalloc failed: %s\n", cudaGetErrorString(err));
+                return MPI_ERR_NO_MEM;
+            }
+            cached_bufsize = bufsize;
         }
+        tmpbuf = cached_tmpbuf;
     } else {
         tmpbuf = malloc(bufsize);
         if (tmpbuf == NULL) {
@@ -244,10 +255,8 @@ int recursive_doubling_allreduce(const void *sendbuf, void *recvbuf,
         }
     }
     
-    /* Clean up: free temporary buffer */
-    if (use_gpu) {
-        cudaFree(tmpbuf);
-    } else {
+    /* Clean up: free temporary buffer only if host memory */
+    if (!use_gpu) {
         free(tmpbuf);
     }
     

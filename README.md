@@ -1,6 +1,8 @@
-# Custom GPU Allreduce (CNCCL)
+# Custom GPU-Aware Allreduce (CNCCL)
 
-A high-performance, GPU-aware implementation of `MPI_Allreduce` tailored for deep learning clusters. This library intercepts standard MPI calls to provide improved latency for small-to-medium message sizes using a **Recursive Doubling** algorithm with **Ping-Pong** buffering.
+A high-performance, GPU-aware implementation of `MPI_Allreduce`. 
+
+This library intercepts standard MPI calls to provide improved latency for small-to-medium message sizes using a **Recursive Doubling** algorithm.
 
 ## Overview
 
@@ -18,7 +20,6 @@ A high-performance, GPU-aware implementation of `MPI_Allreduce` tailored for dee
 ### 2. GPU Optimizations
 - **Direct GPU Access**: Detects device pointers and operates directly on GPU memory (CUDA).
 - **Ping-Pong Buffering**: Alternates between `recvbuf` and a temporary buffer (`tmpbuf`) to overlap communication with computation and avoid strict in-place read/write dependencies.
-- **Async Operations**: Heavy use of `cudaMemcpyAsync` and CUDA streams to keep the GPU busy without blocking the host CPU.
 - **Vectorized Kernels**: Custom reduction kernels (`gpu_reduce.cu`) using `float4` and `double2` vector types for maximum memory bandwidth.
 
 ## Build Instructions
@@ -33,15 +34,10 @@ Navigate to the `gpu` directory and run `make`:
 
 ```bash
 cd gpu
-make
+sh build_gpu.sh
 ```
 
 This generates the shared library: **`libcustom_allreduce.so`**.
-
-_Note: You can override the compiler paths if necessary:_
-```bash
-make CUDA_HOME=/usr/local/cuda MPICC=mpicc
-```
 
 ## Usage
 

@@ -1,0 +1,12 @@
+# Copyright (c) 2026 Cornelis Networks. All rights reserved.
+
+prefix=@prefix@
+exec_prefix=@exec_prefix@
+libdir=@libdir@
+includedir=@includedir@
+
+Name: cail
+Description: GPU-aware MPI_Allreduce interposition library
+Version: @PACKAGE_VERSION@
+Libs: -L${libdir} -lcail
+Cflags: -I${includedir}

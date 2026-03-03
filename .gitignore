@@ -1,0 +1,82 @@
+# Autotools generated files
+Makefile.in
+aclocal.m4
+autom4te.cache/
+config.h
+config.h.in
+config.h.in~
+config.log
+config.status
+config.guess
+config.sub
+configure
+depcomp
+install-sh
+libtool
+ltmain.sh
+missing
+compile
+stamp-h1
+ar-lib
+test-driver
+m4/libtool.m4
+m4/ltoptions.m4
+m4/ltsugar.m4
+m4/ltversion.m4
+m4/lt~obsolete.m4
+
+# Automake
+Makefile
+.deps/
+.dirstamp
+
+# Libtool
+.libs/
+*.la
+*.lo
+
+# Object files
+*.o
+*.obj
+
+# Shared / static libraries
+*.so
+*.so.*
+*.a
+*.dylib
+
+# CUDA
+*.cubin
+*.ptx
+*.fatbin
+*.gpu
+*.i
+*.ii
+
+# pkg-config generated
+cail.pc
+
+# Test binaries
+tests/test_allreduce_basic
+tests/test_allreduce_inplace
+tests/test_allreduce_datatypes
+tests/test_allreduce_algorithms
+tests/test_allreduce_nonpof2
+tests/test_allreduce_edge
+tests/bench_allreduce
+tests/*.log
+tests/*.trs
+
+# Editor / IDE
+*~
+*.swp
+*.swo
+.vscode/
+.idea/
+*.kate-swp
+\#*\#
+.\#*
+
+# OS
+.DS_Store
+Thumbs.db

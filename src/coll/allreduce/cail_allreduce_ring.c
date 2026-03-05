@@ -1,5 +1,27 @@
 /* Copyright (c) 2026 Cornelis Networks. All rights reserved. */
 
+/* Ring Allreduce (reduce-scatter ring + allgather ring)
+ *
+ * Phase 1 (reduce-scatter): the buffer is split into P chunks. Over
+ * P-1 steps, each rank sends one chunk to its right neighbor and
+ * receives one from its left, reducing into the received chunk.
+ * After P-1 steps each rank holds one fully-reduced chunk.
+ *
+ * Phase 2 (allgather): over another P-1 steps, each rank forwards
+ * its reduced chunk around the ring until every rank has all chunks.
+ *
+ * Latency:    O(2 * (P-1)) messages
+ * Bandwidth:  O(2n * (P-1)/P) — near-optimal, same as Rabenseifner
+ *
+ * Strengths: bandwidth-optimal for large messages, simple algorithm
+ * with predictable nearest-neighbor communication pattern.
+ *
+ * Trade-offs: latency grows linearly with P (not logarithmically),
+ * so it becomes expensive at high process counts. Each step only
+ * involves nearest-neighbor communication, which can be advantageous
+ * on topologies where nearest-neighbor is cheap.
+ */
+
 #include "../../core/cail_internal.h"
 #include "../../gpu/cail_gpu.h"
 
@@ -11,31 +33,28 @@ int cail_allreduce_ring(const void *sendbuf, void *recvbuf, int count,
                          MPI_Datatype datatype, MPI_Op op, MPI_Comm comm)
 {
     int rank, nprocs;
-    PMPI_Comm_rank(comm, &rank);
-    PMPI_Comm_size(comm, &nprocs);
+    int rc;
+
+    rc = PMPI_Comm_rank(comm, &rank);
+    CAIL_CHECK(rc);
+    rc = PMPI_Comm_size(comm, &nprocs);
+    CAIL_CHECK(rc);
 
     if (count == 0)
         return MPI_SUCCESS;
 
     cail_datatype_t dtype = cail_mpi_type_to_dtype(datatype);
-    if (dtype == CAIL_INVALID)
-        return MPI_ERR_TYPE;
-
     cail_op_t optype = cail_mpi_op_to_optype(op);
-    if (optype == CAIL_OP_INVALID)
+    int type_size = cail_type_size(dtype);
+    if (dtype == CAIL_INVALID || optype == CAIL_OP_INVALID || type_size <= 0)
         return MPI_ERR_OP;
 
-    int type_size = cail_type_size(dtype);
-    if (type_size <= 0)
-        return MPI_ERR_TYPE;
-
-    const void *src = (sendbuf == MPI_IN_PLACE) ? recvbuf : sendbuf;
+    size_t bufsize = (size_t)count * (size_t)type_size;
 
     if (nprocs == 1) {
-        if (src != recvbuf) {
-            size_t bytes = (size_t)count * (size_t)type_size;
-            int rc = cail_gpu_memcpy(recvbuf, src, bytes);
-            return (rc == 0) ? MPI_SUCCESS : MPI_ERR_INTERN;
+        if (sendbuf != MPI_IN_PLACE && recvbuf != sendbuf) {
+            rc = cail_gpu_memcpy(recvbuf, sendbuf, bufsize);
+            if (rc != 0) return MPI_ERR_INTERN;
         }
         return MPI_SUCCESS;
     }
@@ -46,10 +65,9 @@ int cail_allreduce_ring(const void *sendbuf, void *recvbuf, int count,
         return PMPI_Allreduce(sendbuf, recvbuf, count, datatype, op, comm);
     }
 
-    size_t total_bytes = (size_t)count * (size_t)type_size;
+    const void *src = (sendbuf == MPI_IN_PLACE) ? recvbuf : sendbuf;
     if (src != recvbuf) {
-        int rc = cail_gpu_memcpy(recvbuf, src, total_bytes);
-        if (rc != 0)
+        if (cail_gpu_memcpy(recvbuf, src, bufsize) != 0)
             return MPI_ERR_INTERN;
     }
 
@@ -89,6 +107,10 @@ int cail_allreduce_ring(const void *sendbuf, void *recvbuf, int count,
     int left  = (rank - 1 + nprocs) % nprocs;
     int right = (rank + 1) % nprocs;
 
+    /* Phase 1: Reduce-scatter ring. Over P-1 steps, each rank sends
+     * one chunk to its right neighbor and receives one from its left,
+     * reducing into the received chunk. After P-1 steps each rank
+     * holds exactly one chunk of the fully-reduced result. */
     for (int step = 0; step < nprocs - 1; step++) {
         int send_chunk = (rank - step + nprocs) % nprocs;
         int recv_chunk = (rank - step - 1 + nprocs) % nprocs;
@@ -113,7 +135,10 @@ int cail_allreduce_ring(const void *sendbuf, void *recvbuf, int count,
         }
     }
 
-    /* ---- Allgather phase ---- */
+    /* Phase 2: Allgather ring. Over P-1 steps, each rank forwards
+     * its fully-reduced chunk to the right. No reduction — just
+     * copying. After P-1 steps every chunk has traveled the full
+     * ring and every rank has the complete result. */
     for (int step = 0; step < nprocs - 1; step++) {
         int send_chunk = (rank - step + 1 + nprocs) % nprocs;
         int recv_chunk = (rank - step + nprocs) % nprocs;

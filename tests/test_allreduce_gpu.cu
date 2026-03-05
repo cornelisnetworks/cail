@@ -16,6 +16,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <unistd.h>
 
 #define CUDA_CHECK(call) do {                                          \
     cudaError_t _e = (call);                                           \
@@ -65,9 +66,11 @@ static void report(int rank, int ok, const char *label) {
 /* ------------------------------------------------------------------ */
 /* Test 1: float SUM, various counts                                  */
 /* ------------------------------------------------------------------ */
-static void test_float_sum(int rank, int nprocs) {
-    int counts[] = {1, 10, 100, 1000, 4096, 100000, 200000};
-    int ncounts = sizeof(counts) / sizeof(counts[0]);
+static void test_float_sum(int rank, int nprocs, int opt_count) {
+    int default_counts[] = {1, 10, 100, 1000, 4096, 100000, 200000};
+    int *counts = default_counts;
+    int ncounts = sizeof(default_counts) / sizeof(default_counts[0]);
+    if (opt_count > 0) { counts = &opt_count; ncounts = 1; }
 
     float expected = 0.0f;
     for (int r = 0; r < nprocs; r++) expected += (float)(r + 1);
@@ -115,9 +118,11 @@ static void test_float_sum(int rank, int nprocs) {
 /* ------------------------------------------------------------------ */
 /* Test 2: MPI_IN_PLACE with GPU buffers                              */
 /* ------------------------------------------------------------------ */
-static void test_inplace(int rank, int nprocs) {
-    int counts[] = {100, 4096, 200000};
-    int ncounts = sizeof(counts) / sizeof(counts[0]);
+static void test_inplace(int rank, int nprocs, int opt_count) {
+    int default_counts[] = {100, 4096, 200000};
+    int *counts = default_counts;
+    int ncounts = sizeof(default_counts) / sizeof(default_counts[0]);
+    if (opt_count > 0) { counts = &opt_count; ncounts = 1; }
 
     float expected = 0.0f;
     for (int r = 0; r < nprocs; r++) expected += (float)(r + 1);
@@ -152,9 +157,11 @@ static void test_inplace(int rank, int nprocs) {
 /* ------------------------------------------------------------------ */
 /* Test 3: double SUM                                                 */
 /* ------------------------------------------------------------------ */
-static void test_double_sum(int rank, int nprocs) {
-    int counts[] = {100, 4096, 100000};
-    int ncounts = sizeof(counts) / sizeof(counts[0]);
+static void test_double_sum(int rank, int nprocs, int opt_count) {
+    int default_counts[] = {100, 4096, 100000};
+    int *counts = default_counts;
+    int ncounts = sizeof(default_counts) / sizeof(default_counts[0]);
+    if (opt_count > 0) { counts = &opt_count; ncounts = 1; }
 
     double expected = 0.0;
     for (int r = 0; r < nprocs; r++) expected += (double)(r + 1);
@@ -202,8 +209,8 @@ static void test_double_sum(int rank, int nprocs) {
 /* ------------------------------------------------------------------ */
 /* Test 4: int SUM + MAX + MIN                                        */
 /* ------------------------------------------------------------------ */
-static void test_int_ops(int rank, int nprocs) {
-    int count = 4096;
+static void test_int_ops(int rank, int nprocs, int opt_count) {
+    int count = (opt_count > 0) ? opt_count : 4096;
 
     /* SUM */
     {
@@ -299,10 +306,10 @@ static void test_int_ops(int rank, int nprocs) {
 /* ------------------------------------------------------------------ */
 /* Test 5: float PROD (small nprocs only to avoid overflow)           */
 /* ------------------------------------------------------------------ */
-static void test_float_prod(int rank, int nprocs) {
+static void test_float_prod(int rank, int nprocs, int opt_count) {
     if (nprocs > 4) return;
 
-    int count = 1000;
+    int count = (opt_count > 0) ? opt_count : 1000;
     float *d_send, *d_recv;
     CUDA_CHECK(cudaMalloc(&d_send, count * sizeof(float)));
     CUDA_CHECK(cudaMalloc(&d_recv, count * sizeof(float)));
@@ -333,10 +340,34 @@ static void test_float_prod(int rank, int nprocs) {
     cudaFree(d_recv);
 }
 
+static void usage(const char *prog) {
+    fprintf(stderr, "Usage: %s [-c count] [-a algo] [-h]\n", prog);
+    fprintf(stderr, "  -c count   element count (default: sweep multiple sizes)\n");
+    fprintf(stderr, "  -a algo    set CAIL_ALGO before MPI_Init\n");
+}
+
 /* ------------------------------------------------------------------ */
 /* main                                                               */
 /* ------------------------------------------------------------------ */
 int main(int argc, char **argv) {
+    int opt_count = 0;
+    int opt;
+
+    while ((opt = getopt(argc, argv, "c:a:h")) != -1) {
+        switch (opt) {
+        case 'c':
+            opt_count = atoi(optarg);
+            break;
+        case 'a':
+            setenv("CAIL_ALGO", optarg, 1);
+            break;
+        case 'h':
+        default:
+            usage(argv[0]);
+            return (opt == 'h') ? 0 : 1;
+        }
+    }
+
     MPI_Init(&argc, &argv);
 
     int rank, nprocs;
@@ -358,11 +389,11 @@ int main(int argc, char **argv) {
         fflush(stdout);
     }
 
-    test_float_sum(rank, nprocs);
-    test_inplace(rank, nprocs);
-    test_double_sum(rank, nprocs);
-    test_int_ops(rank, nprocs);
-    test_float_prod(rank, nprocs);
+    test_float_sum(rank, nprocs, opt_count);
+    test_inplace(rank, nprocs, opt_count);
+    test_double_sum(rank, nprocs, opt_count);
+    test_int_ops(rank, nprocs, opt_count);
+    test_float_prod(rank, nprocs, opt_count);
 
     MPI_Barrier(MPI_COMM_WORLD);
 

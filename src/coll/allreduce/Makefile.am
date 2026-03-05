@@ -5,7 +5,6 @@ noinst_LTLIBRARIES = libcail_allreduce.la
 libcail_allreduce_la_SOURCES = \
 	cail_allreduce.c \
 	cail_allreduce_recursive_doubling.c \
-	cail_allreduce_tree.c \
 	cail_allreduce_rabenseifner.c \
 	cail_allreduce_ring.c
 

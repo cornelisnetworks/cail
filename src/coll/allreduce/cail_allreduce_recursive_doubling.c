@@ -1,5 +1,24 @@
 /* Copyright (c) 2026 Cornelis Networks. All rights reserved. */
 
+/* Recursive Doubling Allreduce
+ *
+ * Each rank exchanges its full buffer with a partner at exponentially
+ * increasing distances (1, 2, 4, ...), reducing locally after each
+ * exchange. After log2(P) steps every rank holds the complete result.
+ *
+ * Latency:    O(log2 P) messages
+ * Bandwidth:  O(n * log2 P) — sends the full buffer every step
+ *
+ * Best for small messages where latency dominates: the logarithmic
+ * step count keeps latency low, and the per-step bandwidth waste
+ * (sending the full buffer) is negligible when n is small.
+ *
+ * Trade-offs: bandwidth-inefficient for large messages because each
+ * step transmits the entire buffer. Non-power-of-two process counts
+ * are handled by folding excess ranks into their neighbors before
+ * the main algorithm and unfolding afterward.
+ */
+
 #include "../../core/cail_internal.h"
 #include "../../gpu/cail_gpu.h"
 
@@ -58,6 +77,9 @@ int cail_allreduce_recursive_doubling(const void *sendbuf, void *recvbuf,
     int rem = nprocs - pof2;
     int newrank;
 
+    /* Phase 1: Non-power-of-two fold-in. Excess ranks (rank < 2*rem)
+     * send their data to a neighbor and sit out the main algorithm.
+     * Odd ranks in this range receive, reduce, and participate. */
     if (rank < 2 * rem) {
         if ((rank % 2) == 0) {
             rc = PMPI_Send(recvbuf, count, datatype, rank + 1, 0, comm);
@@ -77,6 +99,10 @@ int cail_allreduce_recursive_doubling(const void *sendbuf, void *recvbuf,
         newrank = rank - rem;
     }
 
+    /* Phase 2: Main recursive doubling among pof2 active ranks.
+     * Each step, exchange full buffer with partner at distance 2^k
+     * and reduce locally. After log2(pof2) steps, all active ranks
+     * hold the complete result. */
     if (newrank != -1) {
         int mask = 1;
         while (mask < pof2) {
@@ -98,6 +124,8 @@ int cail_allreduce_recursive_doubling(const void *sendbuf, void *recvbuf,
         }
     }
 
+    /* Phase 3: Non-power-of-two unfold. Ranks that sat out in
+     * phase 1 receive the final result from their neighbor. */
     if (rank < 2 * rem) {
         if ((rank % 2) == 0) {
             rc = PMPI_Recv(recvbuf, count, datatype, rank + 1, 0, comm, MPI_STATUS_IGNORE);

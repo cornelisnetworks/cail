@@ -17,7 +17,7 @@ cail_datatype_t cail_mpi_type_to_dtype(MPI_Datatype dt)
     if (dt == MPI_SHORT)                         return CAIL_SHORT;
     if (dt == MPI_UNSIGNED_SHORT)                return CAIL_USHORT;
 
-    /* C99 fixed-width type aliases (same underlying types, different MPI handles) */
+    /* C99 fixed-width type aliases */
     if (dt == MPI_INT8_T)                       return CAIL_CHAR;
     if (dt == MPI_UINT8_T)                      return CAIL_UCHAR;
     if (dt == MPI_INT16_T)                      return CAIL_SHORT;
@@ -37,6 +37,66 @@ cail_op_t cail_mpi_op_to_optype(MPI_Op op)
     if (op == MPI_MAX)  return CAIL_MAX;
     if (op == MPI_MIN)  return CAIL_MIN;
     return CAIL_OP_INVALID;
+}
+
+MPI_Datatype cail_dtype_to_mpi_type(cail_datatype_t dtype)
+{
+    switch (dtype) {
+    case CAIL_CHAR:      return MPI_CHAR;
+    case CAIL_SHORT:     return MPI_SHORT;
+    case CAIL_INT:       return MPI_INT;
+    case CAIL_LONG:      return MPI_LONG;
+    case CAIL_LONG_LONG: return MPI_LONG_LONG;
+    case CAIL_FLOAT:     return MPI_FLOAT;
+    case CAIL_DOUBLE:    return MPI_DOUBLE;
+    case CAIL_UCHAR:     return MPI_UNSIGNED_CHAR;
+    case CAIL_USHORT:    return MPI_UNSIGNED_SHORT;
+    case CAIL_UINT:      return MPI_UNSIGNED;
+    case CAIL_ULONG:     return MPI_UNSIGNED_LONG;
+    case CAIL_ULONGLONG: return MPI_UNSIGNED_LONG_LONG;
+    default:              return MPI_DATATYPE_NULL;
+    }
+}
+
+MPI_Op cail_optype_to_mpi_op(cail_op_t op)
+{
+    switch (op) {
+    case CAIL_SUM:  return MPI_SUM;
+    case CAIL_PROD: return MPI_PROD;
+    case CAIL_MAX:  return MPI_MAX;
+    case CAIL_MIN:  return MPI_MIN;
+    default:         return MPI_OP_NULL;
+    }
+}
+
+const char *cail_dtype_name(cail_datatype_t dt)
+{
+    switch (dt) {
+    case CAIL_CHAR:      return "CHAR";
+    case CAIL_INT:       return "INT";
+    case CAIL_LONG:      return "LONG";
+    case CAIL_FLOAT:     return "FLOAT";
+    case CAIL_DOUBLE:    return "DOUBLE";
+    case CAIL_LONG_LONG: return "LONG_LONG";
+    case CAIL_UCHAR:     return "UCHAR";
+    case CAIL_UINT:      return "UINT";
+    case CAIL_ULONG:     return "ULONG";
+    case CAIL_ULONGLONG: return "ULONGLONG";
+    case CAIL_SHORT:     return "SHORT";
+    case CAIL_USHORT:    return "USHORT";
+    default:              return "UNKNOWN";
+    }
+}
+
+const char *cail_op_name(cail_op_t op)
+{
+    switch (op) {
+    case CAIL_SUM:  return "SUM";
+    case CAIL_PROD: return "PROD";
+    case CAIL_MAX:  return "MAX";
+    case CAIL_MIN:  return "MIN";
+    default:         return "UNKNOWN";
+    }
 }
 
 int cail_type_supported(MPI_Datatype dt)

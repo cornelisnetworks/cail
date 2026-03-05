@@ -5,6 +5,86 @@
 #include "cail_allreduce_impl.h"
 #include <mpi.h>
 
+/* ------------------------------------------------------------------ */
+/* Algorithm call helpers                                              */
+/* Each wraps the #ifdef guard so the dispatch matrix stays clean.     */
+/* Forced mode: abort if compiled out (user explicitly requested it).  */
+/* Auto mode:   WARN + PMPI fallback if compiled out.                  */
+/* ------------------------------------------------------------------ */
+
+static inline int call_recursive_doubling(const void *sendbuf, void *recvbuf,
+        int count, MPI_Datatype datatype, MPI_Op op, MPI_Comm comm,
+        const char *reason)
+{
+#ifdef CAIL_ENABLE_RECURSIVE_DOUBLING
+    CAIL_DBG("algorithm=recursive_doubling (%s)", reason);
+    return cail_allreduce_recursive_doubling(sendbuf, recvbuf, count,
+                                              datatype, op, comm);
+#else
+    CAIL_WARN("recursive_doubling selected (%s) but disabled at compile time, "
+              "falling back to PMPI", reason);
+    return PMPI_Allreduce(sendbuf, recvbuf, count, datatype, op, comm);
+#endif
+}
+
+static inline int call_rabenseifner(const void *sendbuf, void *recvbuf,
+        int count, MPI_Datatype datatype, MPI_Op op, MPI_Comm comm,
+        const char *reason)
+{
+#ifdef CAIL_ENABLE_RABENSEIFNER
+    CAIL_DBG("algorithm=rabenseifner (%s)", reason);
+    return cail_allreduce_rabenseifner(sendbuf, recvbuf, count,
+                                        datatype, op, comm);
+#else
+    CAIL_WARN("rabenseifner selected (%s) but disabled at compile time, "
+              "falling back to PMPI", reason);
+    return PMPI_Allreduce(sendbuf, recvbuf, count, datatype, op, comm);
+#endif
+}
+
+static inline int call_ring(const void *sendbuf, void *recvbuf,
+        int count, MPI_Datatype datatype, MPI_Op op, MPI_Comm comm,
+        const char *reason)
+{
+#ifdef CAIL_ENABLE_RING
+    CAIL_DBG("algorithm=ring (%s)", reason);
+    return cail_allreduce_ring(sendbuf, recvbuf, count,
+                                datatype, op, comm);
+#else
+    CAIL_WARN("ring selected (%s) but disabled at compile time, "
+              "falling back to PMPI", reason);
+    return PMPI_Allreduce(sendbuf, recvbuf, count, datatype, op, comm);
+#endif
+}
+
+/* ------------------------------------------------------------------ */
+/* Dispatch helpers                                                    */
+/* Map the two dispatch outcomes to the appropriate algorithm.         */
+/* ------------------------------------------------------------------ */
+
+static inline int dispatch_small_msg(const void *sendbuf, void *recvbuf,
+        int count, MPI_Datatype datatype, MPI_Op op, MPI_Comm comm,
+        const char *reason)
+{
+    return call_recursive_doubling(sendbuf, recvbuf, count, datatype, op,
+                                    comm, reason);
+}
+
+static inline int dispatch_large_msg(const void *sendbuf, void *recvbuf,
+        int count, MPI_Datatype datatype, MPI_Op op, MPI_Comm comm,
+        int nprocs, const char *reason)
+{
+    if (nprocs <= cail_global_state.nprocs_threshold)
+        return call_ring(sendbuf, recvbuf, count, datatype, op,
+                          comm, reason);
+    return call_rabenseifner(sendbuf, recvbuf, count, datatype, op,
+                              comm, reason);
+}
+
+/* ------------------------------------------------------------------ */
+/* 2D dispatch matrix                                                  */
+/* ------------------------------------------------------------------ */
+
 int cail_allreduce_dispatch(const void *sendbuf, void *recvbuf, int count,
                               MPI_Datatype datatype, MPI_Op op, MPI_Comm comm)
 {
@@ -15,126 +95,65 @@ int cail_allreduce_dispatch(const void *sendbuf, void *recvbuf, int count,
     int nprocs;
     PMPI_Comm_size(comm, &nprocs);
 
+    /* --- Forced algorithm (CAIL_ALGO env var) --- */
+
     if (cail_global_state.force_algo != CAIL_ALGO_AUTO) {
+        int pof2 = cail_pof2(nprocs);
+
         switch (cail_global_state.force_algo) {
         case CAIL_ALGO_RECURSIVE_DOUBLING:
 #ifdef CAIL_ENABLE_RECURSIVE_DOUBLING
             CAIL_DBG("algorithm=recursive_doubling (forced)");
             return cail_allreduce_recursive_doubling(sendbuf, recvbuf, count, datatype, op, comm);
 #else
-            CAIL_WARN("recursive_doubling forced but disabled at compile time, falling back to PMPI");
-            return PMPI_Allreduce(sendbuf, recvbuf, count, datatype, op, comm);
+            CAIL_ERR("CAIL_ALGO=recursive_doubling forced but disabled at compile time, aborting");
+            PMPI_Abort(comm, MPI_ERR_INTERN);
 #endif
         case CAIL_ALGO_RING:
 #ifdef CAIL_ENABLE_RING
             CAIL_DBG("algorithm=ring (forced)");
             return cail_allreduce_ring(sendbuf, recvbuf, count, datatype, op, comm);
 #else
-            CAIL_WARN("ring forced but disabled at compile time, falling back to PMPI");
-            return PMPI_Allreduce(sendbuf, recvbuf, count, datatype, op, comm);
+            CAIL_ERR("CAIL_ALGO=ring forced but disabled at compile time, aborting");
+            PMPI_Abort(comm, MPI_ERR_INTERN);
 #endif
         case CAIL_ALGO_RABENSEIFNER:
 #ifdef CAIL_ENABLE_RABENSEIFNER
+            /* Rabenseifner needs count >= pof2; fall back to PMPI when it cannot run */
+            if (count < pof2) {
+                CAIL_WARN("forced rabenseifner but count=%d < pof2=%d, falling back to PMPI",
+                          count, pof2);
+                return PMPI_Allreduce(sendbuf, recvbuf, count, datatype, op, comm);
+            }
             CAIL_DBG("algorithm=rabenseifner (forced)");
             return cail_allreduce_rabenseifner(sendbuf, recvbuf, count, datatype, op, comm);
 #else
-            CAIL_WARN("rabenseifner forced but disabled at compile time, falling back to PMPI");
-            return PMPI_Allreduce(sendbuf, recvbuf, count, datatype, op, comm);
-#endif
-        case CAIL_ALGO_TREE:
-#ifdef CAIL_ENABLE_TREE
-            CAIL_DBG("algorithm=tree (forced)");
-            return cail_allreduce_tree(sendbuf, recvbuf, count, datatype, op, comm);
-#else
-            CAIL_WARN("tree forced but disabled at compile time, falling back to PMPI");
-            return PMPI_Allreduce(sendbuf, recvbuf, count, datatype, op, comm);
+            CAIL_ERR("CAIL_ALGO=rabenseifner forced but disabled at compile time, aborting");
+            PMPI_Abort(comm, MPI_ERR_INTERN);
 #endif
         default:
             break;
         }
     }
 
+    /* --- Auto-dispatch --- */
+
     int pof2 = cail_pof2(nprocs);
 
     /* Rabenseifner reduce-scatter needs count >= pof2 */
-    if (count < pof2) {
-#ifdef CAIL_ENABLE_RECURSIVE_DOUBLING
-        CAIL_DBG("algorithm=recursive_doubling (count=%d < pof2=%d)", count, pof2);
-        return cail_allreduce_recursive_doubling(sendbuf, recvbuf, count, datatype, op, comm);
-#else
-        CAIL_WARN("recursive_doubling needed (count=%d < pof2=%d) but disabled, falling back to PMPI",
-                   count, pof2);
-        return PMPI_Allreduce(sendbuf, recvbuf, count, datatype, op, comm);
-#endif
-    }
+    if (count < pof2)
+        return dispatch_small_msg(sendbuf, recvbuf, count, datatype, op, comm,
+                                   "count < pof2");
 
-    size_t effective_small = cail_global_state.small_threshold;
+    /* Non-pof2 adjustment: halve threshold when rank folding adds overhead */
+    size_t effective_small = cail_global_state.msg_small_threshold;
     if (!cail_is_pof2(nprocs) && nprocs >= 16)
         effective_small /= 2;
 
-    if (nprocs <= cail_global_state.nprocs_small) {
-        if (msg_size < effective_small) {
-#ifdef CAIL_ENABLE_RECURSIVE_DOUBLING
-            CAIL_DBG("algorithm=recursive_doubling (small_scale, msg_size=%zu < threshold=%zu)",
-                      msg_size, effective_small);
-            return cail_allreduce_recursive_doubling(sendbuf, recvbuf, count, datatype, op, comm);
-#elif defined(CAIL_ENABLE_RABENSEIFNER)
-            CAIL_WARN("recursive_doubling preferred but disabled, using rabenseifner");
-            return cail_allreduce_rabenseifner(sendbuf, recvbuf, count, datatype, op, comm);
-#else
-            CAIL_WARN("recursive_doubling preferred but disabled, falling back to PMPI");
-            return PMPI_Allreduce(sendbuf, recvbuf, count, datatype, op, comm);
-#endif
-        } else if (msg_size < cail_global_state.medium_threshold) {
-#ifdef CAIL_ENABLE_RABENSEIFNER
-            CAIL_DBG("algorithm=rabenseifner (small_scale, threshold=%zu <= msg_size=%zu < medium=%zu)",
-                      effective_small, msg_size, cail_global_state.medium_threshold);
-            return cail_allreduce_rabenseifner(sendbuf, recvbuf, count, datatype, op, comm);
-#elif defined(CAIL_ENABLE_RECURSIVE_DOUBLING)
-            CAIL_WARN("rabenseifner preferred but disabled, using recursive_doubling");
-            return cail_allreduce_recursive_doubling(sendbuf, recvbuf, count, datatype, op, comm);
-#else
-            CAIL_WARN("rabenseifner preferred but disabled, falling back to PMPI");
-            return PMPI_Allreduce(sendbuf, recvbuf, count, datatype, op, comm);
-#endif
-        } else {
-#ifdef CAIL_ENABLE_RABENSEIFNER
-            CAIL_DBG("algorithm=rabenseifner (small_scale, msg_size=%zu >= medium=%zu)",
-                      msg_size, cail_global_state.medium_threshold);
-            return cail_allreduce_rabenseifner(sendbuf, recvbuf, count, datatype, op, comm);
-#elif defined(CAIL_ENABLE_RECURSIVE_DOUBLING)
-            CAIL_WARN("rabenseifner preferred but disabled, using recursive_doubling");
-            return cail_allreduce_recursive_doubling(sendbuf, recvbuf, count, datatype, op, comm);
-#else
-            CAIL_WARN("no suitable algorithm available, falling back to PMPI");
-            return PMPI_Allreduce(sendbuf, recvbuf, count, datatype, op, comm);
-#endif
-        }
-    }
+    if (msg_size < effective_small)
+        return dispatch_small_msg(sendbuf, recvbuf, count, datatype, op, comm,
+                                   "msg_size < msg_small_threshold");
 
-    if (msg_size < effective_small) {
-#ifdef CAIL_ENABLE_RECURSIVE_DOUBLING
-        CAIL_DBG("algorithm=recursive_doubling (nprocs=%d, msg_size=%zu < threshold=%zu)",
-                  nprocs, msg_size, effective_small);
-        return cail_allreduce_recursive_doubling(sendbuf, recvbuf, count, datatype, op, comm);
-#elif defined(CAIL_ENABLE_RABENSEIFNER)
-        CAIL_WARN("recursive_doubling preferred but disabled, using rabenseifner");
-        return cail_allreduce_rabenseifner(sendbuf, recvbuf, count, datatype, op, comm);
-#else
-        CAIL_WARN("recursive_doubling preferred but disabled, falling back to PMPI");
-        return PMPI_Allreduce(sendbuf, recvbuf, count, datatype, op, comm);
-#endif
-    }
-
-#ifdef CAIL_ENABLE_RABENSEIFNER
-    CAIL_DBG("algorithm=rabenseifner (nprocs=%d, msg_size=%zu >= threshold=%zu)",
-              nprocs, msg_size, effective_small);
-    return cail_allreduce_rabenseifner(sendbuf, recvbuf, count, datatype, op, comm);
-#elif defined(CAIL_ENABLE_RECURSIVE_DOUBLING)
-    CAIL_WARN("rabenseifner preferred but disabled, using recursive_doubling");
-    return cail_allreduce_recursive_doubling(sendbuf, recvbuf, count, datatype, op, comm);
-#else
-    CAIL_WARN("no suitable algorithm available, falling back to PMPI");
-    return PMPI_Allreduce(sendbuf, recvbuf, count, datatype, op, comm);
-#endif
+    return dispatch_large_msg(sendbuf, recvbuf, count, datatype, op, comm,
+                               nprocs, "msg_size >= msg_small_threshold");
 }

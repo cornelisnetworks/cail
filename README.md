@@ -25,38 +25,32 @@ Fallback to native MPI occurs automatically for:
 
 ## Algorithms
 
-CAIL includes four allreduce algorithms:
+CAIL includes three allreduce algorithms:
 
 | Algorithm           | Latency          | Bandwidth              | Auto-Selected          |
 |---------------------|------------------|------------------------|------------------------|
 | Recursive Doubling  | O(log₂ P)       | O(n · log₂ P)         | Yes (small messages)   |
-| Rabenseifner        | O(2 · log₂ P)   | O(2n · (P-1)/P)       | Yes (large messages)   |
-| Ring                | O(2 · (P-1))    | O(2n · (P-1)/P)       | No (forced only)       |
-| Binary Tree         | O(2 · log₂ P)   | O(2n · log₂ P)        | No (forced only)       |
+| Rabenseifner        | O(2 · log₂ P)   | O(2n · (P-1)/P)       | Yes (large msgs, large scale) |
+| Ring                | O(2 · (P-1))    | O(2n · (P-1)/P)       | Yes (large msgs, small scale) |
 
 ### Automatic Algorithm Selection (2D Dispatch)
 
-Auto-dispatch uses a two-dimensional decision matrix based on both **message
-size** and **process count** (nprocs).
+Auto-dispatch selects an algorithm based on **message size** and **process
+count** (nprocs):
 
-**Small scale** (nprocs ≤ `CAIL_NPROCS_SMALL`, default 4):
+**Small scale** (nprocs ≤ `CAIL_NPROCS_THRESHOLD`, default 4):
 
-| Message Size                    | Algorithm            |
-|---------------------------------|----------------------|
-| < `CAIL_SMALL_THRESHOLD`       | Recursive Doubling   |
-| < `CAIL_MEDIUM_THRESHOLD`      | Rabenseifner         |
-| ≥ `CAIL_MEDIUM_THRESHOLD`      | Rabenseifner         |
+| Message Size                         | Algorithm            |
+|------------------------------------- |----------------------|
+| < `CAIL_MSG_SMALL_THRESHOLD`         | Recursive Doubling   |
+| ≥ `CAIL_MSG_SMALL_THRESHOLD`         | Ring                 |
 
-**Medium/large scale** (nprocs > `CAIL_NPROCS_SMALL`):
+**Large scale** (nprocs > `CAIL_NPROCS_THRESHOLD`):
 
-| Message Size                    | Algorithm            |
-|---------------------------------|----------------------|
-| < `CAIL_SMALL_THRESHOLD`       | Recursive Doubling   |
-| ≥ `CAIL_SMALL_THRESHOLD`       | Rabenseifner         |
-
-At small scale, the medium threshold provides a tuning boundary for future
-algorithm additions. At all scales, Rabenseifner handles all messages above
-the small threshold — it is bandwidth-optimal with logarithmic latency.
+| Message Size                         | Algorithm            |
+|------------------------------------- |----------------------|
+| < `CAIL_MSG_SMALL_THRESHOLD`         | Recursive Doubling   |
+| ≥ `CAIL_MSG_SMALL_THRESHOLD`         | Rabenseifner         |
 
 **Guards applied before the matrix:**
 
@@ -71,8 +65,7 @@ nprocs ≥ 16, the effective small threshold is halved. Both recursive doubling
 and Rabenseifner use rank folding for non-pof2, but the folding overhead makes
 Rabenseifner relatively cheaper sooner.
 
-Ring and Tree are available via `CAIL_ALGO=ring` and `CAIL_ALGO=tree` for
-testing and benchmarking but are not auto-selected.
+Ring and Rabenseifner can also be forced via `CAIL_ALGO`.
 
 Each algorithm can be individually enabled or disabled at configure time
 (all enabled by default).
@@ -109,7 +102,6 @@ make install
 | `--enable-recursive-doubling`   | Enable recursive-doubling algorithm                  | yes      |
 | `--enable-ring`                 | Enable ring algorithm                                | yes      |
 | `--enable-rabenseifner`         | Enable Rabenseifner algorithm                        | yes      |
-| `--enable-tree`                 | Enable binary tree algorithm                         | yes      |
 | `--with-cuda=PATH`              | Path to CUDA toolkit installation                    | auto     |
 | `--with-cuda-arch=SM`           | NVCC architecture flag (e.g. `sm_70`, `sm_80`)       | sm_70    |
 | `--with-mpi=PATH`               | Path to MPI installation                             | auto     |
@@ -120,8 +112,9 @@ make install
 ./configure --enable-host-path
 ```
 
-This builds CAIL with a host-path fallback that uses `MPI_Reduce_local` for
-reductions instead of CUDA kernels. Useful for testing or CPU-only environments.
+This builds CAIL without any GPU dependency. The host-path and GPU backends
+are mutually exclusive at compile time — `--enable-host-path` replaces CUDA
+kernels with `MPI_Reduce_local` and GPU memory allocation with `malloc`/`free`.
 
 ## Usage
 
@@ -155,14 +148,11 @@ initialization).
 | `CAIL_DEBUG`            | Enable debug logging to stderr. Set to any non-empty, non-`0` value. | off        |
 | `CAIL_ALGO`             | Force a specific algorithm, bypassing auto-dispatch. See values below. | `auto`     |
 | `CAIL_MIN_MSG_SIZE`     | Minimum message size (bytes) for CAIL to handle. Smaller messages pass through to native MPI. Set to `0` to disable passthrough. | `65536`    |
-| `CAIL_SMALL_THRESHOLD`  | Message size (bytes) below which recursive doubling is used (within CAIL-handled range). | `8192`     |
-| `CAIL_MEDIUM_THRESHOLD` | Message size (bytes) upper boundary for the middle dispatch region at small scale. | `524288`   |
-| `CAIL_NPROCS_SMALL`     | Process count at or below which "small scale" dispatch rules apply.   | `4`        |
-| `CAIL_NPROCS_LARGE`     | Process count above which "large scale" rules apply (currently same as medium scale). | `64`       |
+| `CAIL_MSG_SMALL_THRESHOLD`  | Message size (bytes) below which recursive doubling is used (within CAIL-handled range). | `8192`     |
+| `CAIL_WARN`                 | Set to `0` to suppress `[cail WARN]` messages. | on         |
 
-`CAIL_SMALL_THRESHOLD` must be < `CAIL_MEDIUM_THRESHOLD` (both revert to
-defaults if violated). `CAIL_NPROCS_SMALL` must be < `CAIL_NPROCS_LARGE`
-(both revert to defaults if violated).
+For non-power-of-two process counts ≥ 16, the effective small threshold is
+automatically halved to account for rank-folding overhead.
 
 For non-power-of-two process counts ≥ 16, the effective small threshold is
 automatically halved to account for rank-folding overhead.
@@ -174,11 +164,10 @@ automatically halved to account for rank-folding overhead.
 | `auto`               | Automatic (default)  | —             |
 | `recursive_doubling` | Recursive Doubling   | Yes           |
 | `rabenseifner`       | Rabenseifner         | Yes           |
-| `ring`               | Ring                 | No            |
-| `tree`               | Binary Tree          | No            |
+| `ring`               | Ring                 | Yes           |
 
-If a forced algorithm was disabled at compile time, CAIL prints a warning
-(`[cail WARN]`) and falls back to `PMPI_Allreduce`.
+If a forced algorithm was disabled at compile time, CAIL aborts with an
+error message (`[cail ERROR]`).
 
 ### Logging Levels
 
@@ -187,7 +176,7 @@ CAIL uses three logging levels on stderr:
 | Prefix            | When                                                        |
 |-------------------|-------------------------------------------------------------|
 | `[cail]`         | Debug messages (algorithm selection, init). Only when `CAIL_DEBUG=1`. |
-| `[cail WARN]`    | Unexpected fallbacks (e.g., preferred algorithm disabled, forced algo can't run). Always printed. |
+| `[cail WARN]`    | Unexpected fallbacks (e.g., preferred algorithm disabled, forced algo can't run). Disable with `CAIL_WARN=0`. |
 | `[cail ERROR]`   | Initialization failures, invalid env var values. Always printed. |
 
 ### Tuning the 2D Dispatch Matrix
@@ -201,17 +190,17 @@ if msg_size < CAIL_MIN_MSG_SIZE:
 if count < pof2(nprocs):
     → recursive_doubling  (always, regardless of thresholds)
 
-if nprocs <= CAIL_NPROCS_SMALL:
-    msg < SMALL_THRESHOLD    → recursive_doubling
-    msg < MEDIUM_THRESHOLD   → rabenseifner
-    msg >= MEDIUM_THRESHOLD  → rabenseifner
+if msg < MSG_SMALL_THRESHOLD:
+    → recursive_doubling
 
-if nprocs > CAIL_NPROCS_SMALL:
-    msg < SMALL_THRESHOLD    → recursive_doubling
-    msg >= SMALL_THRESHOLD   → rabenseifner
+if msg >= MSG_SMALL_THRESHOLD:
+    if nprocs <= NPROCS_THRESHOLD:
+        → ring
+    else:
+        → rabenseifner
 
 Non-pof2 adjustment: if nprocs is not a power of two and nprocs >= 16,
-effective SMALL_THRESHOLD is halved.
+effective MSG_SMALL_THRESHOLD is halved.
 ```
 
 ### Examples
@@ -223,12 +212,12 @@ CAIL_DEBUG=1 CAIL_ALGO=ring mpirun -np 4 ./my_app
 
 Lower the small-message threshold to use Rabenseifner for more message sizes:
 ```sh
-CAIL_SMALL_THRESHOLD=4096 mpirun -np 8 ./my_app
+CAIL_MSG_SMALL_THRESHOLD=4096 mpirun -np 8 ./my_app
 ```
 
 Raise the threshold to keep recursive doubling active for larger messages:
 ```sh
-CAIL_SMALL_THRESHOLD=32768 mpirun -np 8 ./my_app
+CAIL_MSG_SMALL_THRESHOLD=32768 mpirun -np 8 ./my_app
 ```
 
 Lower the passthrough threshold to let CAIL handle smaller messages:
@@ -238,7 +227,7 @@ CAIL_MIN_MSG_SIZE=4096 mpirun -np 4 ./my_app
 
 Widen the "small scale" region for finer-grained tuning at higher process counts:
 ```sh
-CAIL_NPROCS_SMALL=16 mpirun -np 16 ./my_app
+CAIL_NPROCS_THRESHOLD=16 mpirun -np 16 ./my_app
 ```
 
 ## Supported Types and Operations
@@ -296,7 +285,7 @@ runs across two hosts via `mpirun`.
 **Phase 1 — Debug Verification:** Runs with `CAIL_DEBUG=1` and verifies:
 - cail initializes without errors
 - Auto-dispatch selects recursive_doubling for small messages
-- Forced algorithms (ring, rabenseifner, tree) actually dispatch correctly
+- Forced algorithms (ring, rabenseifner) actually dispatch correctly
 - Auto-dispatch selects different algorithms by message size
 
 **Phase 2 — Correctness Matrix:** Runs all 6 test programs × 5 algorithms × 6
@@ -305,8 +294,8 @@ correctness.
 
 **Phase 3 — Env Var Dispatch Verification:** Verifies that tunable
 environment variables affect algorithm selection:
-- `CAIL_SMALL_THRESHOLD`: lowering it shifts messages from recursive_doubling to rabenseifner
-- `CAIL_NPROCS_SMALL`: raising it changes the scale region for a given process count
+- `CAIL_MSG_SMALL_THRESHOLD`: lowering it shifts messages from recursive_doubling to rabenseifner
+- `CAIL_NPROCS_THRESHOLD`: raising it changes the scale region for a given process count
 - Non-pof2 threshold halving: verified at nprocs=17
 
 ### Test Programs
@@ -346,7 +335,6 @@ cail/
       cail_allreduce_recursive_doubling.c
       cail_allreduce_ring.c
       cail_allreduce_rabenseifner.c
-      cail_allreduce_tree.c
     gpu/
       cail_gpu.h           Backend-agnostic GPU interface
       cail_host_reduce.c   Host-path fallback (MPI_Reduce_local)

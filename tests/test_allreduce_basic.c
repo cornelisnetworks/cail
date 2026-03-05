@@ -5,20 +5,43 @@
 #include <stdlib.h>
 #include <math.h>
 #include <string.h>
+#include <unistd.h>
+
+static void usage(const char *prog)
+{
+    fprintf(stderr, "Usage: %s [-c count] [-a algo] [-h]\n", prog);
+    fprintf(stderr, "  -c count   element count (default: sweep 1..200000)\n");
+    fprintf(stderr, "  -a algo    set CAIL_ALGO before MPI_Init\n");
+}
 
 int main(int argc, char **argv)
 {
+    int opt_count = 0;
+    int opt;
+
+    while ((opt = getopt(argc, argv, "c:a:h")) != -1) {
+        switch (opt) {
+        case 'c':
+            opt_count = atoi(optarg);
+            break;
+        case 'a':
+            setenv("CAIL_ALGO", optarg, 1);
+            break;
+        case 'h':
+        default:
+            usage(argv[0]);
+            return (opt == 'h') ? 0 : 1;
+        }
+    }
+
     MPI_Init(&argc, &argv);
     int rank, nprocs;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &nprocs);
 
-    int test_count = 0;
-    if (argc > 1) test_count = atoi(argv[1]);
-
     int counts[] = {1, 10, 100, 1000, 4096, 100000, 200000};
     int ncounts = (int)(sizeof(counts) / sizeof(counts[0]));
-    if (test_count > 0) { counts[0] = test_count; ncounts = 1; }
+    if (opt_count > 0) { counts[0] = opt_count; ncounts = 1; }
 
     float expected_sum = 0.0f;
     for (int r = 0; r < nprocs; r++) expected_sum += (float)(r + 1);

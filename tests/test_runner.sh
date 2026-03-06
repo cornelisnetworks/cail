@@ -7,6 +7,13 @@ MPIRUN="${MPIRUN:-mpirun}"
 MPIRUN_FLAGS="${MPIRUN_FLAGS:-}"
 TEST_BIN="$1"
 shift
+
+# test_allreduce_correctness requires -c count; supply a default for make check
+case "$(basename "$TEST_BIN")" in
+    test_allreduce_correctness|.libs/test_allreduce_correctness)
+        set -- -c 1000 "$@"
+        ;;
+esac
 PASS=0
 FAIL=0
 run_test() {

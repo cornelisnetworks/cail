@@ -22,24 +22,24 @@ if HAVE_CUDA
 
 SUFFIXES = .cu
 
-noinst_PROGRAMS += test_allreduce_gpu bench_allreduce_gpu
+noinst_PROGRAMS += test_allreduce_correctness_gpu bench_allreduce_gpu
 
-test_allreduce_gpu_SOURCES =
-test_allreduce_gpu_LDADD = test_allreduce_gpu.o $(top_builddir)/src/libcail.la $(MPI_LIBS) $(CUDA_LIBS) -lstdc++ -lm
-test_allreduce_gpu_DEPENDENCIES = test_allreduce_gpu.o
+test_allreduce_correctness_gpu_SOURCES =
+test_allreduce_correctness_gpu_LDADD = test_allreduce_correctness_gpu.o $(top_builddir)/src/libcail.la $(MPI_LIBS) $(CUDA_LIBS) -lstdc++ -lm
+test_allreduce_correctness_gpu_DEPENDENCIES = test_allreduce_correctness_gpu.o
 
 bench_allreduce_gpu_SOURCES =
 bench_allreduce_gpu_LDADD = bench_allreduce_gpu.o $(top_builddir)/src/libcail.la $(MPI_LIBS) $(CUDA_LIBS) -lstdc++ -lm
 bench_allreduce_gpu_DEPENDENCIES = bench_allreduce_gpu.o
 
-test_allreduce_gpu.o: $(srcdir)/test_allreduce_gpu.cu
+test_allreduce_correctness_gpu.o: $(srcdir)/test_allreduce_correctness_gpu.cu
 	$(NVCC) $(NVCCFLAGS) $(CUDA_CFLAGS) $(MPI_CFLAGS) -I$(top_srcdir)/src/core -c -o $@ $<
 
 bench_allreduce_gpu.o: $(srcdir)/bench_allreduce_gpu.cu
 	$(NVCC) $(NVCCFLAGS) $(CUDA_CFLAGS) $(MPI_CFLAGS) -I$(top_srcdir)/src/core -c -o $@ $<
 
-CLEANFILES = test_allreduce_gpu.o bench_allreduce_gpu.o
+CLEANFILES = test_allreduce_correctness_gpu.o bench_allreduce_gpu.o
 
 endif
 
-EXTRA_DIST = test_runner.sh test_allreduce_gpu.cu bench_allreduce_gpu.cu
+EXTRA_DIST = test_runner.sh test_allreduce_correctness_gpu.cu bench_allreduce_gpu.cu

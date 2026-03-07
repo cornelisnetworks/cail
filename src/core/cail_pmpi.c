@@ -1,5 +1,17 @@
 /* Copyright (c) 2026 Cornelis Networks. All rights reserved. */
 
+/*
+ * PMPI interposition: this file defines MPI_Allreduce and MPI_Finalize,
+ * overriding the MPI library's versions at link time (or via LD_PRELOAD).
+ * The real MPI implementations remain accessible through the PMPI_* prefix.
+ *
+ * Call chain:
+ *   app calls MPI_Allreduce()
+ *     -> resolves to this file's MPI_Allreduce()
+ *       -> CAIL handles it: cail_allreduce_dispatch() -> algorithm -> PMPI_*
+ *       -> or passthrough:  PMPI_Allreduce() -> real MPI implementation
+ */
+
 #include "cail_internal.h"
 #include "cail_types.h"
 #include "../gpu/cail_gpu.h"
@@ -12,17 +24,22 @@ int MPI_Allreduce(const void *sendbuf, void *recvbuf, int count,
     if (!cail_is_initialized()) {
         rc = cail_init(comm);
         if (rc != MPI_SUCCESS) {
-            CAIL_ERR("cail_init failed (rc=%d), falling back to PMPI", rc);
-            return PMPI_Allreduce(sendbuf, recvbuf, count, datatype, op, comm);
+            CAIL_ERR("cail_init failed (rc=%d), aborting", rc);
+            PMPI_Abort(comm, rc);
         }
     }
 
     if (count == 0)
         return MPI_SUCCESS;
 
-    if (!cail_type_supported(datatype) || !cail_op_supported(op)) {
-        CAIL_WARN("falling back to PMPI_Allreduce: unsupported type=%s op=%s",
-                   cail_mpi_type_name(datatype), cail_mpi_op_name(op));
+    if (!cail_type_supported(datatype)) {
+        CAIL_WARN("falling back to PMPI_Allreduce: unsupported type=%s",
+                   cail_mpi_type_name(datatype));
+        return PMPI_Allreduce(sendbuf, recvbuf, count, datatype, op, comm);
+    }
+    if (!cail_op_supported(op)) {
+        CAIL_WARN("falling back to PMPI_Allreduce: unsupported op=%s",
+                   cail_mpi_op_name(op));
         return PMPI_Allreduce(sendbuf, recvbuf, count, datatype, op, comm);
     }
 
@@ -34,9 +51,12 @@ int MPI_Allreduce(const void *sendbuf, void *recvbuf, int count,
     }
 
 #ifndef CAIL_HOST_PATH
-    const void *check_buf = (sendbuf == MPI_IN_PLACE) ? recvbuf : sendbuf;
-    if (!cail_gpu_is_device_pointer(check_buf)) {
-        CAIL_DBG("falling back to PMPI_Allreduce: host buffer");
+    if (!cail_gpu_is_device_pointer(recvbuf)) {
+        CAIL_DBG("falling back to PMPI_Allreduce: recvbuf is not on GPU");
+        return PMPI_Allreduce(sendbuf, recvbuf, count, datatype, op, comm);
+    }
+    if (sendbuf != MPI_IN_PLACE && !cail_gpu_is_device_pointer(sendbuf)) {
+        CAIL_DBG("falling back to PMPI_Allreduce: sendbuf is not on GPU");
         return PMPI_Allreduce(sendbuf, recvbuf, count, datatype, op, comm);
     }
 #endif

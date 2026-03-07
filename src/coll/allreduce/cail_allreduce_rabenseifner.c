@@ -1,8 +1,28 @@
 /* Copyright (c) 2026 Cornelis Networks. All rights reserved. */
 
-/* cail_allreduce_rabenseifner.c — monolithic Rabenseifner allreduce
- * Implements non-power-of-two folding, recursive-halving reduce-scatter,
- * and recursive-doubling allgather in a single routine.
+/* Rabenseifner Allreduce (reduce-scatter + allgather)
+ *
+ * Phase 1 (reduce-scatter): recursive halving — each step, ranks
+ * exchange half their data with a partner and reduce locally. After
+ * log2(P) steps each rank holds 1/P of the final result.
+ *
+ * Phase 2 (allgather): recursive doubling — each step, ranks
+ * exchange their portion with a partner, doubling the amount of
+ * final data each holds. After log2(P) steps every rank has the
+ * complete result.
+ *
+ * Latency:    O(2 * log2 P) messages (log2 for each phase)
+ * Bandwidth:  O(2n * (P-1)/P) — near-optimal, each byte sent ~twice
+ *
+ * Best for large messages at scale: the bandwidth term is independent
+ * of P (approaches 2n), so it scales well. The reduce-scatter halves
+ * the working set each step, maximizing network utilization.
+ *
+ * Trade-offs: higher latency than recursive doubling (2x the steps),
+ * so it loses to recursive doubling for small messages. Requires
+ * count >= pof2(nprocs) for the reduce-scatter partitioning.
+ * Non-power-of-two process counts are handled by folding excess
+ * ranks before the main algorithm and unfolding afterward.
  */
 #include "../../core/cail_internal.h"
 #include "../../gpu/cail_gpu.h"
@@ -19,40 +39,35 @@ int cail_allreduce_rabenseifner(const void *sendbuf, void *recvbuf, int count,
     PMPI_Comm_rank(comm, &rank);
     PMPI_Comm_size(comm, &nprocs);
 
-    if (count == 0) {
+    if (count == 0)
         return MPI_SUCCESS;
-    }
-
-    if (nprocs == 1) {
-        if (sendbuf != MPI_IN_PLACE && recvbuf != sendbuf) {
-            cail_datatype_t dtype_single = cail_mpi_type_to_dtype(datatype);
-            int type_size_single = cail_type_size(dtype_single);
-            if (dtype_single == CAIL_INVALID || type_size_single < 0) {
-                return MPI_ERR_OP;
-            }
-            size_t bytes_single = (size_t)count * (size_t)type_size_single;
-            int copy_rc = cail_gpu_memcpy(recvbuf, sendbuf, bytes_single);
-            return (copy_rc == 0) ? MPI_SUCCESS : MPI_ERR_INTERN;
-        }
-        return MPI_SUCCESS;
-    }
 
     cail_datatype_t dtype = cail_mpi_type_to_dtype(datatype);
     cail_op_t optype = cail_mpi_op_to_optype(op);
     int type_size = cail_type_size(dtype);
-    if (dtype == CAIL_INVALID || optype == CAIL_OP_INVALID || type_size < 0) {
+    if (dtype == CAIL_INVALID || optype == CAIL_OP_INVALID || type_size <= 0)
         return MPI_ERR_OP;
+
+    size_t bufsize = (size_t)count * (size_t)type_size;
+
+    if (nprocs == 1) {
+        if (sendbuf != MPI_IN_PLACE && recvbuf != sendbuf) {
+            rc = cail_gpu_memcpy(recvbuf, sendbuf, bufsize);
+            if (rc != 0) return MPI_ERR_INTERN;
+        }
+        return MPI_SUCCESS;
     }
+
 
     int pof2_local = cail_pof2(nprocs);
     if (count < pof2_local) {
-        CAIL_WARN("rabenseifner: count=%d < pof2=%d (nprocs=%d), "
-                   "cannot distribute in reduce-scatter, falling back to PMPI",
+        CAIL_ERR("rabenseifner: count=%d < pof2=%d (nprocs=%d), "
+                  "cannot distribute in reduce-scatter, aborting",
                    count, pof2_local, nprocs);
-        return PMPI_Allreduce(sendbuf, recvbuf, count, datatype, op, comm);
+        PMPI_Abort(comm, MPI_ERR_INTERN);
     }
 
-    size_t bufsize = (size_t)count * (size_t)type_size;
+    /* bufsize already computed above */
     void *tmpbuf = NULL;
     rc = cail_buf_get_tmp(&tmpbuf, bufsize);
     if (rc != MPI_SUCCESS) {
@@ -76,6 +91,9 @@ int cail_allreduce_rabenseifner(const void *sendbuf, void *recvbuf, int count,
     int rem = nprocs - pof2;
     int newrank;
 
+    /* Phase 1: Non-power-of-two fold-in. Excess ranks (rank < 2*rem)
+     * send their data to a neighbor and sit out the main algorithm.
+     * Odd ranks in this range receive, reduce, and participate. */
     if (rank < 2 * rem) {
         if (rank % 2 == 0) {
             rc = PMPI_Send(recvbuf, count, datatype, rank + 1, 0, comm);
@@ -130,6 +148,10 @@ int cail_allreduce_rabenseifner(const void *sendbuf, void *recvbuf, int count,
         int recv_idx = 0;
         int last_idx = pof2;
 
+        /* Phase 2a: Reduce-scatter via recursive halving. Each step,
+         * exchange half the remaining data with a partner and reduce
+         * locally. After log2(pof2) steps each rank holds 1/pof2 of
+         * the fully-reduced result. */
         while (mask < pof2) {
             int newdst = newrank ^ mask;
             int dst = (newdst < rem) ? newdst * 2 + 1 : newdst + rem;
@@ -180,6 +202,10 @@ int cail_allreduce_rabenseifner(const void *sendbuf, void *recvbuf, int count,
         }
 
         mask >>= 1;
+        /* Phase 2b: Allgather via recursive doubling. Each step,
+         * exchange reduced portions with a partner, doubling the
+         * amount of final data each rank holds. After log2(pof2)
+         * steps every active rank has the complete result. */
         while (mask > 0) {
             int newdst = newrank ^ mask;
             int dst = (newdst < rem) ? newdst * 2 + 1 : newdst + rem;
@@ -226,6 +252,8 @@ int cail_allreduce_rabenseifner(const void *sendbuf, void *recvbuf, int count,
         }
     }
 
+    /* Phase 3: Non-power-of-two unfold. Ranks that sat out in
+     * phase 1 receive the final result from their neighbor. */
     if (rank < 2 * rem) {
         if (rank % 2) {
             rc = PMPI_Send(recvbuf, count, datatype, rank - 1, 0, comm);

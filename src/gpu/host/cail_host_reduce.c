@@ -4,42 +4,12 @@
  * Compiled only when CAIL_HOST_PATH is defined (--enable-host-path).
  * Uses malloc/free for memory and MPI_Reduce_local for reductions.
  */
-#include "cail_gpu.h"
+#include "../cail_gpu.h"
+#include "../../core/cail_types.h"
 #include <mpi.h>
 #include <stdlib.h>
 #include <string.h>
 
-/* Map internal type ID back to MPI_Datatype */
-static MPI_Datatype dtype_to_mpi(cail_datatype_t dtype)
-{
-    switch (dtype) {
-    case CAIL_CHAR:      return MPI_CHAR;
-    case CAIL_SHORT:     return MPI_SHORT;
-    case CAIL_INT:       return MPI_INT;
-    case CAIL_LONG:      return MPI_LONG;
-    case CAIL_LONG_LONG: return MPI_LONG_LONG;
-    case CAIL_FLOAT:     return MPI_FLOAT;
-    case CAIL_DOUBLE:    return MPI_DOUBLE;
-    case CAIL_UCHAR:     return MPI_UNSIGNED_CHAR;
-    case CAIL_USHORT:    return MPI_UNSIGNED_SHORT;
-    case CAIL_UINT:      return MPI_UNSIGNED;
-    case CAIL_ULONG:     return MPI_UNSIGNED_LONG;
-    case CAIL_ULONGLONG: return MPI_UNSIGNED_LONG_LONG;
-    default:              return MPI_DATATYPE_NULL;
-    }
-}
-
-/* Map internal op ID back to MPI_Op */
-static MPI_Op optype_to_mpi(cail_op_t op)
-{
-    switch (op) {
-    case CAIL_SUM:  return MPI_SUM;
-    case CAIL_PROD: return MPI_PROD;
-    case CAIL_MAX:  return MPI_MAX;
-    case CAIL_MIN:  return MPI_MIN;
-    default:         return MPI_OP_NULL;
-    }
-}
 
 /* Host-path always returns 0 (not device memory) */
 int cail_gpu_is_device_pointer(const void *ptr)
@@ -52,8 +22,8 @@ int cail_gpu_is_device_pointer(const void *ptr)
 int cail_gpu_reduce_local(const void *in, void *inout, size_t count,
                             cail_datatype_t dtype, cail_op_t op)
 {
-    MPI_Datatype mpi_dt = dtype_to_mpi(dtype);
-    MPI_Op       mpi_op = optype_to_mpi(op);
+    MPI_Datatype mpi_dt = cail_dtype_to_mpi_type(dtype);
+    MPI_Op       mpi_op = cail_optype_to_mpi_op(op);
 
     if (mpi_dt == MPI_DATATYPE_NULL || mpi_op == MPI_OP_NULL) {
         return -1;

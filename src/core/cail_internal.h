@@ -21,26 +21,24 @@
 #define CAIL_ERR(fmt, ...) \
     fprintf(stderr, "[cail ERROR] " fmt "\n", ##__VA_ARGS__)
 
-/* Warning: always printed (not gated by debug), for unexpected fallbacks */
+/* Warning: gated by CAIL_WARN env var (default: enabled) */
 #define CAIL_WARN(fmt, ...) \
-    fprintf(stderr, "[cail WARN] " fmt "\n", ##__VA_ARGS__)
+    do { if (cail_global_state.warn) \
+        fprintf(stderr, "[cail WARN] " fmt "\n", ##__VA_ARGS__); } while (0)
 
 #define CAIL_CHECK(rc) \
     do { if ((rc) != MPI_SUCCESS) return (rc); } while (0)
 
 #define CAIL_ENV_DEBUG            "CAIL_DEBUG"
 #define CAIL_ENV_ALGO             "CAIL_ALGO"
-#define CAIL_ENV_SMALL_THRESHOLD  "CAIL_SMALL_THRESHOLD"
-#define CAIL_ENV_MEDIUM_THRESHOLD "CAIL_MEDIUM_THRESHOLD"
-#define CAIL_ENV_NPROCS_SMALL     "CAIL_NPROCS_SMALL"
-#define CAIL_ENV_NPROCS_LARGE     "CAIL_NPROCS_LARGE"
-#define CAIL_ENV_MIN_MSG_SIZE     "CAIL_MIN_MSG_SIZE"
+#define CAIL_ENV_MSG_SMALL_THRESHOLD  "CAIL_MSG_SMALL_THRESHOLD"
+#define CAIL_ENV_NPROCS_THRESHOLD     "CAIL_NPROCS_THRESHOLD"
+#define CAIL_ENV_MIN_MSG_SIZE         "CAIL_MIN_MSG_SIZE"
+#define CAIL_ENV_WARN                 "CAIL_WARN"
 
-#define CAIL_DEFAULT_SMALL_THRESHOLD   8192U       /* 8 KB  */
-#define CAIL_DEFAULT_MEDIUM_THRESHOLD  524288U     /* 512 KB */
-#define CAIL_DEFAULT_NPROCS_SMALL      4U
-#define CAIL_DEFAULT_NPROCS_LARGE      64U
-#define CAIL_DEFAULT_MIN_MSG_SIZE      65536U      /* 64 KB */
+#define CAIL_DEFAULT_MSG_SMALL_THRESHOLD   8192U       /* 8 KB  */
+#define CAIL_DEFAULT_NPROCS_THRESHOLD      4U
+#define CAIL_DEFAULT_MIN_MSG_SIZE          65536U      /* 64 KB */
 
 /* Compute largest power-of-two ≤ n (n must be > 0) */
 static inline int cail_pof2(int n)
@@ -57,20 +55,17 @@ static inline int cail_is_pof2(int n)
 }
 
 typedef struct cail_state {
-    int    initialized;
-    int    debug;
-    size_t small_threshold;
-    size_t medium_threshold;
-    int    nprocs_small;      /* nprocs ≤ this → "small scale" rules */
-    int    nprocs_large;      /* nprocs > this → "large scale" rules  */
-    size_t min_msg_size;      /* msg_size below this → passthrough to PMPI */
-    int    force_algo;        /* CAIL_ALGO_AUTO or forced cail_algo_t value */
+    int    initialized;       /* 1 after cail_init() succeeds */
+    int    debug;             /* emit debug traces to stderr (CAIL_DEBUG) */
+    int    warn;              /* emit warnings to stderr (CAIL_WARN, default: on) */
+    size_t msg_small_threshold;  /* msg bytes below this → recursive_doubling (CAIL_MSG_SMALL_THRESHOLD) */
+    int    nprocs_threshold;  /* nprocs ≤ this → small-scale dispatch rules (CAIL_NPROCS_THRESHOLD) */
+    size_t min_msg_size;      /* msg bytes below this → passthrough to PMPI (CAIL_MIN_MSG_SIZE) */
+    int    force_algo;        /* CAIL_ALGO_AUTO or forced algorithm (CAIL_ALGO) */
 } cail_state_t;
 
 extern cail_state_t cail_global_state;
 
-typedef int (*cail_allreduce_fn)(const void *, void *, int,
-                                   MPI_Datatype, MPI_Op, MPI_Comm);
 
 int  cail_init(MPI_Comm comm);
 void cail_finalize(void);

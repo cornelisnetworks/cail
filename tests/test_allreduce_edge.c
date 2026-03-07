@@ -5,9 +5,30 @@
 #include <stdlib.h>
 #include <math.h>
 #include <string.h>
+#include <unistd.h>
+
+static void usage(const char *prog)
+{
+    fprintf(stderr, "Usage: %s [-a algo] [-h]\n", prog);
+    fprintf(stderr, "  -a algo    set CAIL_ALGO before MPI_Init\n");
+}
 
 int main(int argc, char **argv)
 {
+    int opt;
+
+    while ((opt = getopt(argc, argv, "a:h")) != -1) {
+        switch (opt) {
+        case 'a':
+            setenv("CAIL_ALGO", optarg, 1);
+            break;
+        case 'h':
+        default:
+            usage(argv[0]);
+            return (opt == 'h') ? 0 : 1;
+        }
+    }
+
     MPI_Init(&argc, &argv);
     int rank, nprocs;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);

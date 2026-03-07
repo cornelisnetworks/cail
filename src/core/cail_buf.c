@@ -1,13 +1,17 @@
 /* Copyright (c) 2026 Cornelis Networks. All rights reserved. */
 
-/* cail_buf.c — Single-buffer cache for temporary GPU buffers
+/* cail_buf.c — Single-buffer cache for algorithm scratch space.
  *
- * Centralizes the static-buffer caching pattern previously inlined in
- * recursive_doubling.c (lines 98-115).  The cache grows on demand but
- * never shrinks until cail_buf_finalize() is called.
+ * GPU memory allocation (cudaMalloc) is expensive relative to the reduction
+ * itself, so we cache a single buffer that grows to the high-water mark and
+ * is reused across calls. After a few allreduce calls the buffer stabilizes
+ * and no further allocations occur. The buffer is freed at MPI_Finalize.
+ *
+ * This is the standard pattern used by UCC, NCCL, and Open MPI coll
+ * components for collective scratch space.
  *
  * Host-path: when CAIL_HOST_PATH is defined, uses malloc/free instead
- * of the GPU allocator so the library can be tested without a GPU.
+ * of the GPU allocator.
  */
 
 #include "cail_internal.h"

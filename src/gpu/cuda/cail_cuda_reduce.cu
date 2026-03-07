@@ -297,10 +297,9 @@ extern "C" int cail_cuda_synchronize(void) {
     return (cudaStreamSynchronize(cail_stream) == cudaSuccess) ? 0 : -1;
 }
 
-/* Fence that reads from the actual receive buffer rather than a separate
-   allocation.  For NIC-originated RDMA writes (dmabuf GPUDirect), the PCIe
-   read must target the same memory region to guarantee ordering — a read
-   from a different allocation may not drain the NIC's posted writes. */
+/* PCIe read fence: reads the last byte of the receive buffer into pinned
+   host memory, forcing a D→H transaction that drains any prior posted
+   writes (NIC RDMA, GDRCopy BAR stores) to the same GPU memory region. */
 extern "C" int cail_gpu_flush_recv_buf(const void *recv_buf, size_t recv_bytes) {
     if (!flush_host_byte || !recv_buf || recv_bytes == 0) return 0;
     cudaMemcpy(flush_host_byte, (const char*)recv_buf + recv_bytes - 1,
@@ -308,33 +307,6 @@ extern "C" int cail_gpu_flush_recv_buf(const void *recv_buf, size_t recv_bytes) 
     return 0;
 }
 
-static const char *dtype_name(cail_datatype_t dt) {
-    switch (dt) {
-    case CAIL_CHAR:      return "CHAR";
-    case CAIL_INT:       return "INT";
-    case CAIL_LONG:      return "LONG";
-    case CAIL_FLOAT:     return "FLOAT";
-    case CAIL_DOUBLE:    return "DOUBLE";
-    case CAIL_LONG_LONG: return "LONG_LONG";
-    case CAIL_UCHAR:     return "UCHAR";
-    case CAIL_UINT:      return "UINT";
-    case CAIL_ULONG:     return "ULONG";
-    case CAIL_ULONGLONG: return "ULONGLONG";
-    case CAIL_SHORT:     return "SHORT";
-    case CAIL_USHORT:    return "USHORT";
-    default:              return "UNKNOWN";
-    }
-}
-
-static const char *op_name(cail_op_t op) {
-    switch (op) {
-    case CAIL_SUM:  return "SUM";
-    case CAIL_PROD: return "PROD";
-    case CAIL_MAX:  return "MAX";
-    case CAIL_MIN:  return "MIN";
-    default:         return "UNKNOWN";
-    }
-}
 
 extern "C" int cail_gpu_reduce_local(const void *in, void *inout, size_t count,
                                        cail_datatype_t dtype, cail_op_t op) {
@@ -346,7 +318,7 @@ extern "C" int cail_gpu_reduce_local(const void *in, void *inout, size_t count,
     cail_cuda_kernel_fn fn = kernel_table[op][dtype];
     if (fn == 0) {
         fprintf(stderr, "[cail WARN] gpu_reduce_local: no kernel for dtype=%s op=%s\n",
-                dtype_name(dtype), op_name(op));
+                cail_dtype_name(dtype), cail_op_name(op));
         return -1;
     }
     if (cail_stream == 0) {
@@ -358,7 +330,7 @@ extern "C" int cail_gpu_reduce_local(const void *in, void *inout, size_t count,
     if (err != cudaSuccess) {
         fprintf(stderr, "[cail WARN] gpu_reduce_local: cudaStreamSynchronize failed (%s) "
                 "for dtype=%s op=%s count=%zu\n",
-                cudaGetErrorString(err), dtype_name(dtype), op_name(op), count);
+                cudaGetErrorString(err), cail_dtype_name(dtype), cail_op_name(op), count);
         return -1;
     }
     return 0;

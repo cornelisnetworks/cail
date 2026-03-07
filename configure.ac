@@ -5,7 +5,7 @@ dnl cail — GPU-aware MPI_Allreduce interposition library
 dnl ---------------------------------------------------------------------------
 
 AC_PREREQ([2.69])
-AC_INIT([cail], [0.1.0], [bug-cail@cornelisnetworks.com])
+AC_INIT([cail], [0.1.0])
 AM_INIT_AUTOMAKE([foreign subdir-objects -Wall -Werror])
 AC_CONFIG_MACRO_DIRS([m4])
 AC_CONFIG_HEADERS([config.h])
@@ -23,7 +23,7 @@ AC_PROG_CC
 AC_PROG_CXX
 
 dnl ---------------------------------------------------------------------------
-dnl MPI (macro provided by m4/ax_check_mpi.m4 — Task 2)
+dnl MPI (macro provided by m4/ax_check_mpi.m4)
 dnl ---------------------------------------------------------------------------
 AX_CHECK_MPI
 
@@ -99,19 +99,6 @@ AS_IF([test "x$enable_rabenseifner" = "xyes"], [
     [Define to 1 to enable Rabenseifner algorithm])
 ])
 
-AC_ARG_ENABLE([tree],
-  [AS_HELP_STRING([--enable-tree],
-    [Enable tree allreduce algorithm @<:@default=yes@:>@])],
-  [enable_tree=$enableval],
-  [enable_tree=yes])
-
-AM_CONDITIONAL([CAIL_ENABLE_TREE],
-  [test "x$enable_tree" = "xyes"])
-AS_IF([test "x$enable_tree" = "xyes"], [
-  AC_DEFINE([CAIL_ENABLE_TREE], [1],
-    [Define to 1 to enable tree algorithm])
-])
-
 dnl ---------------------------------------------------------------------------
 dnl --with-cuda-arch : NVCC architecture flag
 dnl ---------------------------------------------------------------------------
@@ -141,6 +128,7 @@ AC_CONFIG_FILES([
   src/gpu/Makefile
   src/gpu/cuda/Makefile
   src/gpu/rocm/Makefile
+  src/gpu/host/Makefile
   tests/Makefile
   cail.pc
 ])

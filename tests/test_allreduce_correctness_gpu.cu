@@ -259,6 +259,23 @@ int main(int argc, char **argv)
     int g_pass = 0;
     int g_fail = 0;
 
+    /* Pre-allocate GPU and host buffers at the maximum needed size
+     * (count * largest_type_size).  Reusing a single allocation avoids
+     * hammering the Open MPI rcache VMA interval tree with hundreds of
+     * cudaMalloc/cudaFree cycles, which triggers a SEGV in
+     * opal_interval_tree_traverse at certain power-of-2 buffer sizes. */
+    size_t max_elem_size = 0;
+    for (int ti = 0; ti < ntypes; ti++)
+        if (types[ti].size > max_elem_size) max_elem_size = types[ti].size;
+    size_t max_bufsize = (size_t)count * max_elem_size;
+
+    void *d_send, *d_recv, *d_inplace;
+    CUDA_CHECK(cudaMalloc(&d_send, max_bufsize));
+    CUDA_CHECK(cudaMalloc(&d_recv, max_bufsize));
+    CUDA_CHECK(cudaMalloc(&d_inplace, max_bufsize));
+    void *h_check = malloc(max_bufsize);
+    if (!h_check) { fprintf(stderr, "malloc failed\n"); MPI_Abort(MPI_COMM_WORLD, 1); }
+
     for (int ti = 0; ti < ntypes; ti++) {
         for (int oi = 0; oi < nops; oi++) {
             /* PROD overflows quickly — skip for large process counts. */
@@ -268,23 +285,18 @@ int main(int argc, char **argv)
             size_t bufsize = (size_t)count * types[ti].size;
 
             /* --- Separate send/recv buffers --- */
+            CUDA_CHECK(cudaMemset(d_recv, 0, bufsize));
+            gpu_fill_buf(d_send, count, types[ti].size,
+                         types[ti].is_float, rank);
+
+            MPI_Allreduce(d_send, d_recv, count, types[ti].mpi_type,
+                          ops[oi].mpi_op, MPI_COMM_WORLD);
+
+            CUDA_CHECK(cudaMemcpy(h_check, d_recv, bufsize,
+                                  cudaMemcpyDeviceToHost));
+
             {
-                void *d_send, *d_recv;
-                CUDA_CHECK(cudaMalloc(&d_send, bufsize));
-                CUDA_CHECK(cudaMalloc(&d_recv, bufsize));
-                CUDA_CHECK(cudaMemset(d_recv, 0, bufsize));
-
-                gpu_fill_buf(d_send, count, types[ti].size,
-                             types[ti].is_float, rank);
-
-                MPI_Allreduce(d_send, d_recv, count, types[ti].mpi_type,
-                              ops[oi].mpi_op, MPI_COMM_WORLD);
-
-                void *h_recv = malloc(bufsize);
-                CUDA_CHECK(cudaMemcpy(h_recv, d_recv, bufsize,
-                                      cudaMemcpyDeviceToHost));
-
-                int pass = check_buf(h_recv, count, &types[ti], expected);
+                int pass = check_buf(h_check, count, &types[ti], expected);
                 if (rank == 0) {
                     printf("%s: algo=%s %s x %s count=%d np=%d pof2=%s\n",
                            pass ? "PASS" : "FAIL", algo_name,
@@ -293,28 +305,20 @@ int main(int argc, char **argv)
                     fflush(stdout);
                 }
                 if (pass) g_pass++; else g_fail++;
-
-                free(h_recv);
-                cudaFree(d_send);
-                cudaFree(d_recv);
             }
 
             /* --- MPI_IN_PLACE --- */
+            gpu_fill_buf(d_inplace, count, types[ti].size,
+                         types[ti].is_float, rank);
+
+            MPI_Allreduce(MPI_IN_PLACE, d_inplace, count, types[ti].mpi_type,
+                          ops[oi].mpi_op, MPI_COMM_WORLD);
+
+            CUDA_CHECK(cudaMemcpy(h_check, d_inplace, bufsize,
+                                  cudaMemcpyDeviceToHost));
+
             {
-                void *d_buf;
-                CUDA_CHECK(cudaMalloc(&d_buf, bufsize));
-
-                gpu_fill_buf(d_buf, count, types[ti].size,
-                             types[ti].is_float, rank);
-
-                MPI_Allreduce(MPI_IN_PLACE, d_buf, count, types[ti].mpi_type,
-                              ops[oi].mpi_op, MPI_COMM_WORLD);
-
-                void *h_buf = malloc(bufsize);
-                CUDA_CHECK(cudaMemcpy(h_buf, d_buf, bufsize,
-                                      cudaMemcpyDeviceToHost));
-
-                int pass = check_buf(h_buf, count, &types[ti], expected);
+                int pass = check_buf(h_check, count, &types[ti], expected);
                 if (rank == 0) {
                     printf("%s: algo=%s MPI_IN_PLACE %s x %s count=%d np=%d pof2=%s\n",
                            pass ? "PASS" : "FAIL", algo_name,
@@ -323,12 +327,14 @@ int main(int argc, char **argv)
                     fflush(stdout);
                 }
                 if (pass) g_pass++; else g_fail++;
-
-                free(h_buf);
-                cudaFree(d_buf);
             }
         }
     }
+
+    free(h_check);
+    cudaFree(d_send);
+    cudaFree(d_recv);
+    cudaFree(d_inplace);
 
     MPI_Barrier(MPI_COMM_WORLD);
 

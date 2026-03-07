@@ -72,11 +72,10 @@ static inline int dispatch_small_msg(const void *sendbuf, void *recvbuf,
 
 static inline int dispatch_large_msg(const void *sendbuf, void *recvbuf,
         int count, MPI_Datatype datatype, MPI_Op op, MPI_Comm comm,
-        int nprocs, const char *reason)
+        const char *reason)
 {
-    if (nprocs <= cail_global_state.nprocs_threshold)
-        return call_ring(sendbuf, recvbuf, count, datatype, op,
-                          comm, reason);
+    /* Rabenseifner is the best large-message algorithm at all tested GPU
+     * scales (np=2..8).  Ring is kept as a forced-only option. */
     return call_rabenseifner(sendbuf, recvbuf, count, datatype, op,
                               comm, reason);
 }
@@ -155,5 +154,5 @@ int cail_allreduce_dispatch(const void *sendbuf, void *recvbuf, int count,
                                    "msg_size < msg_small_threshold");
 
     return dispatch_large_msg(sendbuf, recvbuf, count, datatype, op, comm,
-                               nprocs, "msg_size >= msg_small_threshold");
+                               "msg_size >= msg_small_threshold");
 }

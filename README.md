@@ -72,7 +72,7 @@ CAIL intercepts `MPI_Allreduce` when all of these are true:
 - Datatype is one of the 20 supported MPI types (see below)
 - Operation is SUM, PROD, MAX, or MIN
 - Communicator is an intracommunicator
-- Message size >= `CAIL_MIN_MSG_SIZE` (default 64 KB)
+- Message size >= `CAIL_MIN_MSG_SIZE` (default 32 KB)
 
 Everything else falls back transparently to native `PMPI_Allreduce`.
 
@@ -83,9 +83,9 @@ All variables are read once at the first `MPI_Allreduce` call.
 | Variable                     | Description                                              | Default  |
 |------------------------------|----------------------------------------------------------|----------|
 | `CAIL_ALGO`                  | Force a specific algorithm (see values below)            | `auto`   |
-| `CAIL_MIN_MSG_SIZE`          | Minimum message size in bytes for CAIL to handle. Messages smaller than this pass through to native MPI. Set to `0` to disable passthrough. | `65536` (64 KB) |
-| `CAIL_MSG_SMALL_THRESHOLD`   | Messages strictly below this size (in bytes) use the small-message algorithm; messages at or above use the large-message algorithm. | `8192` (8 KB) |
-| `CAIL_NPROCS_THRESHOLD`      | Process counts at or below this value use small-scale dispatch rules for large messages. Above this, large-scale rules apply. | `4` |
+| `CAIL_MIN_MSG_SIZE`          | Minimum message size in bytes for CAIL to handle. Messages smaller than this pass through to native MPI. Set to `0` to disable passthrough. | `32768` (32 KB) |
+| `CAIL_MSG_SMALL_THRESHOLD`   | Messages strictly below this size (in bytes) use the small-message algorithm; messages at or above use the large-message algorithm. | `262144` (256 KB) |
+| `CAIL_NPROCS_THRESHOLD`      | Process count threshold (currently unused by auto-dispatch; reserved for future use). | `4` |
 | `CAIL_DEBUG`                 | Enable debug logging to stderr. Set to any non-empty, non-`0` value. | off |
 | `CAIL_WARN`                  | Set to `0` to suppress `[cail WARN]` messages.           | on       |
 
@@ -154,8 +154,7 @@ message size and process count. The dispatch logic, in order:
 1. msg_size < CAIL_MIN_MSG_SIZE       → native MPI (passthrough)
 2. count < pof2(nprocs)               → small-message algorithm
 3. msg_size < CAIL_MSG_SMALL_THRESHOLD → small-message algorithm
-4. nprocs <= CAIL_NPROCS_THRESHOLD     → large-message, small-scale algorithm
-5. otherwise                           → large-message, large-scale algorithm
+4. otherwise                           → large-message algorithm
 ```
 
 **Default algorithm mapping:**
@@ -163,8 +162,7 @@ message size and process count. The dispatch logic, in order:
 | Dispatch Slot                      | Algorithm           |
 |------------------------------------|---------------------|
 | Small-message                      | Recursive Doubling  |
-| Large-message, small-scale         | Ring                |
-| Large-message, large-scale         | Rabenseifner        |
+| Large-message                      | Rabenseifner        |
 
 For non-power-of-two process counts >= 16, the effective small threshold is
 automatically halved to account for rank-folding overhead.
@@ -174,7 +172,7 @@ automatically halved to account for rank-folding overhead.
 All dispatch thresholds are tunable via environment variables. Here are common
 tuning scenarios:
 
-**Let CAIL handle smaller messages** (default passthrough is 64 KB):
+**Let CAIL handle smaller messages** (default passthrough is 32 KB):
 ```sh
 CAIL_MIN_MSG_SIZE=4096 mpirun -np 4 -x LD_PRELOAD=... ./my_app
 ```

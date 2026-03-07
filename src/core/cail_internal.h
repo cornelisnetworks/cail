@@ -36,9 +36,9 @@
 #define CAIL_ENV_MIN_MSG_SIZE         "CAIL_MIN_MSG_SIZE"
 #define CAIL_ENV_WARN                 "CAIL_WARN"
 
-#define CAIL_DEFAULT_MSG_SMALL_THRESHOLD   8192U       /* 8 KB  */
+#define CAIL_DEFAULT_MSG_SMALL_THRESHOLD   262144U     /* 256 KB */
 #define CAIL_DEFAULT_NPROCS_THRESHOLD      4U
-#define CAIL_DEFAULT_MIN_MSG_SIZE          65536U      /* 64 KB */
+#define CAIL_DEFAULT_MIN_MSG_SIZE          32768U      /* 32 KB */
 
 /* Compute largest power-of-two ≤ n (n must be > 0) */
 static inline int cail_pof2(int n)

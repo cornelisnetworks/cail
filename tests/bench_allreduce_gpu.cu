@@ -3,26 +3,17 @@
 /*
  * bench_allreduce_gpu.cu — GPU-buffer benchmark for cail MPI_Allreduce
  *
- * Same as bench_allreduce.c but uses cudaMalloc'd device buffers so
+ * Same as bench_allreduce.c but uses GPU device buffers so
  * cail's GPU path is exercised instead of falling back to PMPI.
  */
 #include <mpi.h>
-#include <cuda_runtime.h>
+#include "test_gpu_compat.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #define DEFAULT_WARMUP     10
 #define DEFAULT_ITERATIONS 100
-
-#define CUDA_CHECK(call) do {                                          \
-    cudaError_t _e = (call);                                           \
-    if (_e != cudaSuccess) {                                           \
-        fprintf(stderr, "CUDA error %s:%d: %s\n", __FILE__, __LINE__, \
-                cudaGetErrorString(_e));                                \
-        MPI_Abort(MPI_COMM_WORLD, 1);                                  \
-    }                                                                  \
-} while (0)
 
 int main(int argc, char **argv)
 {
@@ -32,13 +23,13 @@ int main(int argc, char **argv)
     MPI_Comm_size(MPI_COMM_WORLD, &nprocs);
 
     int dev_count = 0;
-    cudaGetDeviceCount(&dev_count);
+    gpuGetDeviceCount(&dev_count);
     if (dev_count == 0) {
-        if (rank == 0) fprintf(stderr, "No CUDA devices found\n");
+        if (rank == 0) fprintf(stderr, "No GPU devices found\n");
         MPI_Finalize();
         return 1;
     }
-    CUDA_CHECK(cudaSetDevice(rank % dev_count));
+    GPU_CHECK(gpuSetDevice(rank % dev_count));
 
     size_t min_bytes  = 4;
     size_t max_bytes  = 16 * 1024 * 1024;
@@ -57,8 +48,8 @@ int main(int argc, char **argv)
     }
 
     float *d_buf;
-    CUDA_CHECK(cudaMalloc(&d_buf, max_bytes));
-    CUDA_CHECK(cudaMemset(d_buf, 0, max_bytes));
+    GPU_CHECK(gpuMalloc(&d_buf, max_bytes));
+    GPU_CHECK(gpuMemset(d_buf, 0, max_bytes));
 
     for (size_t size = min_bytes; size <= max_bytes; size *= 4) {
         int count = (int)(size / sizeof(float));
@@ -98,7 +89,7 @@ int main(int argc, char **argv)
         }
     }
 
-    cudaFree(d_buf);
+    gpuFree(d_buf);
     MPI_Finalize();
     return 0;
 }

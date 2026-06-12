@@ -3,11 +3,13 @@ dnl AX_CHECK_CUDA — Detect CUDA toolkit, nvcc, and set build variables
 dnl ---------------------------------------------------------------------------
 AC_DEFUN([AX_CHECK_CUDA], [
   dnl --with-cuda=PATH
-  AC_ARG_WITH([cuda],
-    [AS_HELP_STRING([--with-cuda=PATH],
-      [Path to CUDA toolkit @<:@default=auto@:>@])],
-    [with_cuda=$withval],
-    [with_cuda=auto])
+  AS_IF([test "x$with_cuda" = "x"], [
+    AC_ARG_WITH([cuda],
+      [AS_HELP_STRING([--with-cuda=PATH],
+        [Path to CUDA toolkit @<:@default=auto@:>@])],
+      [with_cuda=$withval],
+      [with_cuda=auto])
+  ])
 
   have_cuda=no
 
@@ -49,13 +51,6 @@ AC_DEFUN([AX_CHECK_CUDA], [
       ], [
         AC_MSG_NOTICE([nvcc not found — CUDA disabled])
       ])
-    ])
-  ])
-
-  dnl If CUDA required (not host-path and not --without-cuda), fail
-  AS_IF([test "x$have_cuda" = "xno" && test "x$with_cuda" != "xno" && test "x$enable_host_path" != "xyes"], [
-    AS_IF([test "x$with_cuda" != "xauto"], [
-      AC_MSG_ERROR([CUDA requested but not found. Use --without-cuda or --enable-host-path for CPU-only build.])
     ])
   ])
 

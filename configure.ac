@@ -100,6 +100,36 @@ AS_IF([test "x$enable_rabenseifner" = "xyes"], [
 ])
 
 dnl ---------------------------------------------------------------------------
+dnl GPU backend selection options
+dnl ---------------------------------------------------------------------------
+AC_ARG_WITH([cuda],
+  [AS_HELP_STRING([--with-cuda=PATH],
+    [Path to CUDA toolkit @<:@default=auto@:>@])],
+  [with_cuda=$withval],
+  [with_cuda=auto])
+
+AC_ARG_WITH([rocm],
+  [AS_HELP_STRING([--with-rocm=PATH],
+    [Path to ROCm toolkit @<:@default=auto@:>@])],
+  [with_rocm=$withval],
+  [with_rocm=auto])
+
+user_with_cuda=$with_cuda
+user_with_rocm=$with_rocm
+
+AS_IF([test "x$with_rocm" != "xauto" && test "x$with_rocm" != "xno" && test "x$with_cuda" = "xauto"], [
+  with_cuda=no
+])
+AS_IF([test "x$with_cuda" != "xauto" && test "x$with_cuda" != "xno" && test "x$with_rocm" = "xauto"], [
+  with_rocm=no
+])
+
+AS_IF([test "x$enable_host_path" = "xyes"], [
+  with_cuda=no
+  with_rocm=no
+])
+
+dnl ---------------------------------------------------------------------------
 dnl --with-cuda-arch : NVCC architecture flag
 dnl ---------------------------------------------------------------------------
 AC_ARG_WITH([cuda-arch],
@@ -111,10 +141,41 @@ AC_ARG_WITH([cuda-arch],
 AC_SUBST([CUDA_ARCH], [$cuda_arch])
 
 dnl ---------------------------------------------------------------------------
-dnl CUDA (macro provided by m4/ax_check_cuda.m4)
-dnl Must come after --with-cuda-arch so $cuda_arch is set for NVCCFLAGS
+dnl --with-rocm-arch : HIP architecture flag
+dnl ---------------------------------------------------------------------------
+AC_ARG_WITH([rocm-arch],
+  [AS_HELP_STRING([--with-rocm-arch=GFX],
+    [Set ROCm offload architecture for hipcc (e.g. gfx90a); default empty uses hipcc autodetect])],
+  [rocm_arch=$withval],
+  [rocm_arch=])
+
+AC_SUBST([ROCM_ARCH], [$rocm_arch])
+
+dnl ---------------------------------------------------------------------------
+dnl CUDA / ROCm detection
 dnl ---------------------------------------------------------------------------
 AX_CHECK_CUDA
+AX_CHECK_ROCM
+
+dnl ---------------------------------------------------------------------------
+dnl Final backend selection validation
+dnl ---------------------------------------------------------------------------
+AS_IF([test "x$enable_host_path" = "xyes"], [
+  AS_IF([test "x$user_with_cuda" != "xauto" && test "x$user_with_cuda" != "xno"], [
+    AC_MSG_ERROR([host-path excludes GPU backends])
+  ])
+  AS_IF([test "x$user_with_rocm" != "xauto" && test "x$user_with_rocm" != "xno"], [
+    AC_MSG_ERROR([host-path excludes GPU backends])
+  ])
+], [
+  AS_IF([test "x$have_cuda" = "xyes" && test "x$have_rocm" = "xyes"], [
+    AC_MSG_ERROR([choose one GPU backend: CUDA or ROCm])
+  ], [
+    AS_IF([test "x$have_cuda" = "xno" && test "x$have_rocm" = "xno"], [
+      AC_MSG_ERROR([no GPU backend: pass --with-cuda=PATH, --with-rocm=PATH, or --enable-host-path])
+    ])
+  ])
+])
 
 dnl ---------------------------------------------------------------------------
 dnl Output

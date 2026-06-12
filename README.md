@@ -2,7 +2,7 @@
 
 CAIL is a drop-in GPU-aware `MPI_Allreduce` optimization library. It uses the
 MPI profiling interface (PMPI) to transparently intercept `MPI_Allreduce` calls
-and route them through optimized algorithms with native CUDA reduction kernels.
+and route them through optimized algorithms with native CUDA/HIP reduction kernels.
 No application changes are required, just `LD_PRELOAD` the library.
 
 ## Quick Start
@@ -10,7 +10,7 @@ No application changes are required, just `LD_PRELOAD` the library.
 ### Prerequisites
 
 - MPI implementation (OpenMPI, MPICH, Intel MPI, etc.)
-- CUDA Toolkit (nvcc, cudart)
+- CUDA Toolkit (nvcc, cudart) or ROCm Toolkit (hipcc, amdhip64)
 - Autotools (autoconf >= 2.69, automake, libtool)
 
 ### Build
@@ -48,6 +48,8 @@ Look for `[cail] initialized:` and `[cail] algorithm=` on stderr to confirm CAIL
 |---------------------------------|------------------------------------------------------|----------|
 | `--with-cuda=PATH`              | Path to CUDA toolkit installation                    | auto     |
 | `--with-cuda-arch=SM`           | NVCC architecture flag (e.g. `sm_70`, `sm_90`)       | `sm_70`  |
+| `--with-rocm=PATH`              | Path to ROCm toolkit installation                    | auto     |
+| `--with-rocm-arch=GFX`          | HIP offload architecture (e.g. `gfx90a`); empty lets hipcc autodetect | empty |
 | `--with-mpi=PATH`               | Path to MPI installation                             | auto     |
 | `--enable-host-path`            | Build without GPU support (host-only, uses `MPI_Reduce_local`) | no |
 | `--enable-debug`                | Debug build with `-g -O0`                            | no       |
@@ -55,7 +57,13 @@ Look for `[cail] initialized:` and `[cail] algorithm=` on stderr to confirm CAIL
 | `--enable-ring`                 | Enable ring algorithm                                | yes      |
 | `--enable-rabenseifner`         | Enable Rabenseifner algorithm                        | yes      |
 
-### Host-Only Build (No CUDA)
+### ROCm Build
+
+```sh
+./configure --with-rocm=/opt/rocm --with-rocm-arch=gfx90a
+```
+
+### Host-Only Build (No CUDA/ROCm)
 
 ```sh
 ./configure --enable-host-path
@@ -68,7 +76,7 @@ with `malloc`/`free`. Useful for development or CPU-only clusters.
 
 CAIL intercepts `MPI_Allreduce` when all of these are true:
 
-- Buffer resides on a CUDA device (or built with `--enable-host-path`)
+- Buffer resides on a CUDA or ROCm device (or built with `--enable-host-path`)
 - Datatype is one of the 20 supported MPI types (see below)
 - Operation is SUM, PROD, MAX, or MIN
 - Communicator is an intracommunicator
@@ -211,9 +219,9 @@ CAIL_ALGO=ring CAIL_DEBUG=1 mpirun -np 4 -x LD_PRELOAD=... ./my_app
 | `test_allreduce_basic`        | CPU     | Float SUM across 7 message sizes, internal count sweep |
 | `test_allreduce_correctness`  | CPU     | All 20 datatypes × 4 ops × {normal, MPI_IN_PLACE}. Requires `-c count`. |
 | `test_allreduce_edge`         | CPU     | Edge cases: count=0, count=1, large counts, single process |
-| `test_allreduce_correctness_gpu` | GPU  | All 20 datatypes × 4 ops × {normal, MPI_IN_PLACE}. Requires `-c count`. CUDA build only. |
+| `test_allreduce_correctness_gpu` | GPU  | All 20 datatypes × 4 ops × {normal, MPI_IN_PLACE}. Requires `-c count`. CUDA or ROCm build. |
 | `bench_allreduce`             | CPU     | Performance benchmark across message sizes    |
-| `bench_allreduce_gpu`         | GPU     | GPU performance benchmark. CUDA build only.   |
+| `bench_allreduce_gpu`         | GPU     | GPU performance benchmark. CUDA or ROCm build. |
 
 ### Test CLI
 

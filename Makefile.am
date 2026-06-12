@@ -7,5 +7,5 @@ ACLOCAL_AMFLAGS = -I m4
 pkgconfigdir = $(libdir)/pkgconfig
 pkgconfig_DATA = cail.pc
 
-EXTRA_DIST = autogen.sh cail.pc.in cuda_lt.sh
+EXTRA_DIST = autogen.sh cail.pc.in cuda_lt.sh hip_lt.sh
 DISTCLEANFILES = cail.pc

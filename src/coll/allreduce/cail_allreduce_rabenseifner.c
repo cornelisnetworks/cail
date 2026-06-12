@@ -259,6 +259,10 @@ int cail_allreduce_rabenseifner(const void *sendbuf, void *recvbuf, int count,
             rc = PMPI_Send(recvbuf, count, datatype, rank - 1, 0, comm);
         } else {
             rc = PMPI_Recv(recvbuf, count, datatype, rank + 1, 0, comm, MPI_STATUS_IGNORE);
+            if (rc == MPI_SUCCESS) {
+                /* Flush the GPU-aware receive before the caller reads recvbuf. */
+                cail_gpu_flush_recv_buf(recvbuf, bufsize);
+            }
         }
     }
 

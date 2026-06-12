@@ -259,6 +259,12 @@ int cail_allreduce_rabenseifner(const void *sendbuf, void *recvbuf, int count,
             rc = PMPI_Send(recvbuf, count, datatype, rank - 1, 0, comm);
         } else {
             rc = PMPI_Recv(recvbuf, count, datatype, rank + 1, 0, comm, MPI_STATUS_IGNORE);
+            if (rc == MPI_SUCCESS) {
+                /* The application may read recvbuf from a GPU kernel as soon
+                 * as MPI_Allreduce returns; drain posted PCIe writes from the
+                 * GPU-aware receive before handing the buffer back. */
+                cail_gpu_flush_recv_buf(recvbuf, bufsize);
+            }
         }
     }
 

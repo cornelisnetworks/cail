@@ -27,7 +27,10 @@ int cail_gpu_free(void *ptr) {
 }
 
 int cail_gpu_memcpy(void *dst, const void *src, size_t size) {
-    return (cudaMemcpy(dst, src, size, cudaMemcpyDefault) == cudaSuccess) ? 0 : -1;
+    if (cudaMemcpy(dst, src, size, cudaMemcpyDefault) != cudaSuccess)
+        return -1;
+    /* Fence the staged copy before MPI/NIC reads the buffer. */
+    return (cudaStreamSynchronize(0) == cudaSuccess) ? 0 : -1;
 }
 
 int cail_gpu_synchronize(void) { return cail_cuda_synchronize(); }

@@ -13,6 +13,10 @@ libcail_gpu_la_LIBADD += host/libcail_host.la
 else
 if HAVE_CUDA
 libcail_gpu_la_LIBADD += cuda/libcail_cuda.la
+else
+if HAVE_ROCM
+libcail_gpu_la_LIBADD += rocm/libcail_rocm.la
+endif
 endif
 endif
 

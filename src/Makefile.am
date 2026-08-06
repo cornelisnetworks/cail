@@ -15,6 +15,10 @@ if HAVE_CUDA
 libcail_la_LDFLAGS += $(CUDA_LIBS) -lstdc++
 endif
 
+if HAVE_ROCM
+libcail_la_LDFLAGS += $(ROCM_LIBS) -lstdc++
+endif
+
 include_HEADERS = core/cail.h
 
 AM_CFLAGS = $(MPI_CFLAGS)

@@ -42,4 +42,28 @@ CLEANFILES = test_allreduce_correctness_gpu.o bench_allreduce_gpu.o
 
 endif
 
-EXTRA_DIST = test_runner.sh test_allreduce_correctness_gpu.cu bench_allreduce_gpu.cu
+if HAVE_ROCM
+
+SUFFIXES = .cu
+
+noinst_PROGRAMS += test_allreduce_correctness_gpu bench_allreduce_gpu
+
+test_allreduce_correctness_gpu_SOURCES =
+test_allreduce_correctness_gpu_LDADD = test_allreduce_correctness_gpu.o $(top_builddir)/src/libcail.la $(MPI_LIBS) $(ROCM_LIBS) -lstdc++ -lm
+test_allreduce_correctness_gpu_DEPENDENCIES = test_allreduce_correctness_gpu.o
+
+bench_allreduce_gpu_SOURCES =
+bench_allreduce_gpu_LDADD = bench_allreduce_gpu.o $(top_builddir)/src/libcail.la $(MPI_LIBS) $(ROCM_LIBS) -lstdc++ -lm
+bench_allreduce_gpu_DEPENDENCIES = bench_allreduce_gpu.o
+
+test_allreduce_correctness_gpu.o: $(srcdir)/test_allreduce_correctness_gpu.cu
+	$(HIPCC) $(HIPCCFLAGS) $(ROCM_CFLAGS) $(MPI_CFLAGS) -x hip -I$(top_srcdir)/src/core -c -o $@ $<
+
+bench_allreduce_gpu.o: $(srcdir)/bench_allreduce_gpu.cu
+	$(HIPCC) $(HIPCCFLAGS) $(ROCM_CFLAGS) $(MPI_CFLAGS) -x hip -I$(top_srcdir)/src/core -c -o $@ $<
+
+CLEANFILES = test_allreduce_correctness_gpu.o bench_allreduce_gpu.o
+
+endif
+
+EXTRA_DIST = test_runner.sh test_allreduce_correctness_gpu.cu bench_allreduce_gpu.cu test_gpu_compat.h

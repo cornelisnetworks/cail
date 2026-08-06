@@ -3,12 +3,12 @@
 /* cail_gpu.h — Backend-agnostic GPU interface for cail
  * Implemented by: CUDA (cail_cuda_reduce.cu + cail_cuda_mem.c)
  *                 Host-path (cail_host_reduce.c)
- *                 ROCm stub (cail_rocm_reduce_stub.c)
+ *                 ROCm (cail_rocm_reduce.hip + cail_rocm_mem.c)
  */
 #ifndef CAIL_GPU_H
 #define CAIL_GPU_H
 
-#include "cail_types.h"
+#include "../core/cail_types.h"
 #include <stddef.h>
 #include <mpi.h>
 

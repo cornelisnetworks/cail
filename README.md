@@ -74,7 +74,13 @@ with `malloc`/`free`. Useful for development or CPU-only clusters.
 
 ### When CAIL Intercepts
 
-CAIL intercepts `MPI_Allreduce` when all of these are true:
+CAIL intercepts `MPI_Allreduce` and, when the MPI library provides MPI-4
+large-count bindings (`MPI_VERSION >= 4`, e.g. MPICH 4+), `MPI_Allreduce_c`.
+The large-count entry point matters for Python: mpi4py 4.x calls
+`MPI_Allreduce_c` for every `Allreduce`. Calls with a count above `INT_MAX`
+pass through to `PMPI_Allreduce_c`.
+
+CAIL handles a call when all of these are true:
 
 - Buffer resides on a CUDA or ROCm device (or built with `--enable-host-path`)
 - Datatype is one of the 20 supported MPI types (see below)

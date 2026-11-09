@@ -3,7 +3,8 @@
 check_PROGRAMS = \
     test_allreduce_basic \
     test_allreduce_correctness \
-    test_allreduce_edge
+    test_allreduce_edge \
+    test_allreduce_large_count
 
 noinst_PROGRAMS = bench_allreduce
 
@@ -13,6 +14,7 @@ LOG_COMPILER = $(srcdir)/test_runner.sh
 test_allreduce_basic_SOURCES       = test_allreduce_basic.c
 test_allreduce_correctness_SOURCES = test_allreduce_correctness.c
 test_allreduce_edge_SOURCES        = test_allreduce_edge.c
+test_allreduce_large_count_SOURCES = test_allreduce_large_count.c
 bench_allreduce_SOURCES            = bench_allreduce.c
 
 AM_CFLAGS = $(MPI_CFLAGS) -I$(top_srcdir)/src/core
